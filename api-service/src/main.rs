@@ -1,10 +1,13 @@
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
+use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::LogExporter;
+use opentelemetry_otlp::{LogExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use serde::Serialize;
 use std::sync::LazyLock;
 use tower_http::trace::TraceLayer;
@@ -14,6 +17,17 @@ use tracing_subscriber::{EnvFilter, Layer};
 
 static RESOURCE: LazyLock<Resource> =
     LazyLock::new(|| Resource::builder().with_service_name("api-service").build());
+
+fn init_tracer() -> SdkTracerProvider {
+    let exporter = SpanExporter::builder().with_tonic().build().unwrap();
+
+    let provider = SdkTracerProvider::builder()
+        .with_resource(RESOURCE.clone())
+        .with_batch_exporter(exporter)
+        .build();
+    global::set_tracer_provider(provider.clone());
+    provider
+}
 
 fn init_logs() -> SdkLoggerProvider {
     let exporter = LogExporter::builder().with_tonic().build().unwrap();
@@ -31,7 +45,7 @@ fn init_logs() -> SdkLoggerProvider {
             .add_directive("h2=off".parse().unwrap())
             .add_directive("reqwest=off".parse().unwrap())
             .add_directive("tower=off".parse().unwrap())
-            .add_directive("tower_http=debug".parse().unwrap())
+            .add_directive("tower_http=trace".parse().unwrap())
             .add_directive("axum=trace".parse().unwrap()),
     );
 
@@ -50,6 +64,24 @@ fn init_logs() -> SdkLoggerProvider {
 #[tokio::main]
 async fn main() {
     let _logger_provider = init_logs();
+    let tracer_provider = init_tracer();
+
+    let tracer = tracer_provider.tracer("my-tracer");
+    tracer.in_span("Main operation", |cx| {
+        let span = cx.span();
+        span.add_event("Nice operation!".to_string(), vec![KeyValue::new("bogons", 100)]);
+        span.set_attribute(KeyValue::new("another.key", "yes"));
+
+        tracing::info!(name: "my-event-inside-span", target: "my-target", "hello from {}. My price is {}. I am also inside a Span!", "banana", 2.99);
+
+        tracer.in_span("Sub operation...", |cx| {
+            let span = cx.span();
+            span.set_attribute(KeyValue::new("another.key", "yes"));
+            span.add_event("Sub span event", vec![]);
+        });
+    });
+
+    tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
     let app = Router::new()
         .route("/ping", get(ping))
