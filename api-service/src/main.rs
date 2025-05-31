@@ -1,22 +1,56 @@
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::LogExporter;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use serde::Serialize;
+use std::sync::LazyLock;
 use tower_http::trace::TraceLayer;
-use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
+
+static RESOURCE: LazyLock<Resource> =
+    LazyLock::new(|| Resource::builder().with_service_name("api-service").build());
+
+fn init_logs() -> SdkLoggerProvider {
+    let exporter = LogExporter::builder().with_tonic().build().unwrap();
+
+    let provider = SdkLoggerProvider::builder()
+        .with_resource(RESOURCE.clone())
+        .with_batch_exporter(exporter)
+        .build();
+
+    let otel_layer = OpenTelemetryTracingBridge::new(&provider).with_filter(
+        EnvFilter::new("info")
+            .add_directive("api-service=trace".parse().unwrap())
+            .add_directive("hyper=off".parse().unwrap())
+            .add_directive("tonic=off".parse().unwrap())
+            .add_directive("h2=off".parse().unwrap())
+            .add_directive("reqwest=off".parse().unwrap())
+            .add_directive("tower=off".parse().unwrap())
+            .add_directive("tower_http=debug".parse().unwrap())
+            .add_directive("axum=trace".parse().unwrap()),
+    );
+
+    tracing_subscriber::registry()
+        .with(otel_layer)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_thread_names(true)
+                .with_filter(EnvFilter::new("info")),
+        )
+        .init();
+
+    provider
+}
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::builder()
-                .with_default_directive(LevelFilter::TRACE.into())
-                .from_env_lossy(),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let _logger_provider = init_logs();
+
     let app = Router::new()
         .route("/ping", get(ping))
         .layer(TraceLayer::new_for_http());
