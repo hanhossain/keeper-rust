@@ -1,15 +1,20 @@
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
+use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::{LogExporter, SpanExporter};
+use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use serde::Serialize;
 use std::sync::LazyLock;
+use std::time::Duration;
+use tokio::signal;
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -26,6 +31,18 @@ fn init_tracer() -> SdkTracerProvider {
         .with_batch_exporter(exporter)
         .build();
     global::set_tracer_provider(provider.clone());
+    provider
+}
+
+fn init_metrics() -> SdkMeterProvider {
+    let exporter = MetricExporter::builder().with_tonic().build().unwrap();
+
+    let provider = SdkMeterProvider::builder()
+        .with_resource(RESOURCE.clone())
+        .with_periodic_exporter(exporter)
+        .build();
+
+    global::set_meter_provider(provider.clone());
     provider
 }
 
@@ -63,8 +80,19 @@ fn init_logs() -> SdkLoggerProvider {
 
 #[tokio::main]
 async fn main() {
-    let _logger_provider = init_logs();
+    let logger_provider = init_logs();
     let tracer_provider = init_tracer();
+
+    let meter_provider = init_metrics();
+    let meter = meter_provider.meter("some-meter");
+    let counter = meter
+        .u64_counter("test_counter")
+        .with_description("display purposes")
+        .build();
+
+    for _ in 0..10 {
+        counter.add(1, &[KeyValue::new("test_key", "test_value")])
+    }
 
     let tracer = tracer_provider.tracer("my-tracer");
     tracer.in_span("Main operation", |cx| {
@@ -83,14 +111,39 @@ async fn main() {
 
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
-    let app = Router::new()
-        .route("/ping", get(ping))
-        .layer(TraceLayer::new_for_http());
+    let _ = meter_provider.shutdown().unwrap();
+
+    let app = Router::new().route("/ping", get(ping)).layer((
+        TraceLayer::new_for_http(),
+        TimeoutLayer::new(Duration::from_secs(10)),
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
+
+    let _ = tracer_provider.shutdown();
+    let _ = meter_provider.shutdown();
+    let _ = logger_provider.shutdown();
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async { signal::ctrl_c().await.unwrap() };
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .unwrap()
+            .recv()
+            .await;
+    };
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {}
+    }
 }
 
 async fn ping() -> (StatusCode, Json<Ping>) {
