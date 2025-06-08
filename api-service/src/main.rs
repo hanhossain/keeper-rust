@@ -1,8 +1,11 @@
+use axum::extract::{MatchedPath, Request};
 use axum::http::StatusCode;
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
@@ -109,6 +112,7 @@ async fn main() {
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
     let middleware = ServiceBuilder::new()
+        .layer(axum::middleware::from_fn(root_span_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::new(Duration::from_secs(10)));
     let app = Router::new().route("/ping", get(ping)).layer(middleware);
@@ -126,6 +130,43 @@ async fn main() {
     let _ = tracer_provider.shutdown();
     let _ = meter_provider.shutdown();
     let _ = logger_provider.shutdown();
+}
+
+async fn root_span_middleware(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+
+    let mut attributes = vec![
+        KeyValue::new("http.request.method", method.to_string()),
+        KeyValue::new("url.path", uri.path().to_string()),
+    ];
+
+    if let Some(path) = request.extensions().get::<MatchedPath>() {
+        attributes.push(KeyValue::new("http.route", path.as_str().to_owned()));
+    }
+
+    if let Some(query) = uri.query() {
+        attributes.push(KeyValue::new("url.query", query.to_owned()));
+    }
+
+    let tracer = global::tracer("api-service");
+    let _span = tracer
+        .span_builder(format!("{} {}", method, uri.path()))
+        .with_kind(SpanKind::Server)
+        .with_attributes(attributes)
+        .start(&tracer);
+
+    // TODO: set required and recommended server span attributes
+    // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span
+    // url.scheme
+    // error.type
+    // http.response.status_code
+
+    // TODO: do I need to set the context?
+    // let cx = Context::current_with_span(span);
+    // let _guard = cx.attach();
+    let response = next.run(request).await;
+    response
 }
 
 async fn shutdown_signal() {
