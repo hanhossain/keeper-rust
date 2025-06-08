@@ -1,5 +1,5 @@
 use axum::extract::{MatchedPath, Request};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Version};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::get;
@@ -14,7 +14,9 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::attribute::URL_QUERY;
-use opentelemetry_semantic_conventions::trace::{HTTP_REQUEST_METHOD, HTTP_ROUTE, URL_PATH};
+use opentelemetry_semantic_conventions::trace::{
+    HTTP_REQUEST_METHOD, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH, URL_SCHEME,
+};
 use serde::Serialize;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -141,6 +143,9 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
     let mut attributes = vec![
         KeyValue::new(HTTP_REQUEST_METHOD, method.to_string()),
         KeyValue::new(URL_PATH, uri.path().to_string()),
+        KeyValue::new(URL_SCHEME, uri.scheme_str().unwrap_or("http").to_string()),
+        // TODO: consider trimming HTTP/ from the version
+        KeyValue::new(NETWORK_PROTOCOL_VERSION, format!("{:?}", request.version())),
     ];
 
     if let Some(path) = request.extensions().get::<MatchedPath>() {
@@ -160,7 +165,6 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
 
     // TODO: set required and recommended server span attributes
     // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span
-    // url.scheme
     // error.type
     // http.response.status_code
 
