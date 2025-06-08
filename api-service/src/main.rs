@@ -68,11 +68,7 @@ fn init_logs() -> SdkLoggerProvider {
 
     tracing_subscriber::registry()
         .with(otel_layer)
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_thread_names(true)
-                .with_filter(EnvFilter::new("info")),
-        )
+        .with(tracing_subscriber::fmt::layer().with_filter(EnvFilter::new("info")))
         .init();
 
     provider
