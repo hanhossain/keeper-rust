@@ -13,6 +13,8 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_semantic_conventions::attribute::URL_QUERY;
+use opentelemetry_semantic_conventions::trace::{HTTP_REQUEST_METHOD, HTTP_ROUTE, URL_PATH};
 use serde::Serialize;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -137,16 +139,16 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
     let uri = request.uri().clone();
 
     let mut attributes = vec![
-        KeyValue::new("http.request.method", method.to_string()),
-        KeyValue::new("url.path", uri.path().to_string()),
+        KeyValue::new(HTTP_REQUEST_METHOD, method.to_string()),
+        KeyValue::new(URL_PATH, uri.path().to_string()),
     ];
 
     if let Some(path) = request.extensions().get::<MatchedPath>() {
-        attributes.push(KeyValue::new("http.route", path.as_str().to_owned()));
+        attributes.push(KeyValue::new(HTTP_ROUTE, path.as_str().to_owned()));
     }
 
     if let Some(query) = uri.query() {
-        attributes.push(KeyValue::new("url.query", query.to_owned()));
+        attributes.push(KeyValue::new(URL_QUERY, query.to_owned()));
     }
 
     let tracer = global::tracer("api-service");
