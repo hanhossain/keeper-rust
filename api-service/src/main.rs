@@ -5,7 +5,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
@@ -15,7 +15,8 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::attribute::URL_QUERY;
 use opentelemetry_semantic_conventions::trace::{
-    HTTP_REQUEST_METHOD, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH, URL_SCHEME,
+    HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
+    URL_SCHEME,
 };
 use serde::Serialize;
 use std::sync::LazyLock;
@@ -162,7 +163,7 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
     }
 
     let tracer = global::tracer("api-service");
-    let _span = tracer
+    let mut span = tracer
         .span_builder(route.map_or(method.to_string(), |route| format!("{method} {route}")))
         .with_kind(SpanKind::Server)
         .with_attributes(attributes)
@@ -171,12 +172,21 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
     // TODO: set required and recommended server span attributes
     // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span
     // error.type
-    // http.response.status_code
 
     // TODO: do I need to set the context?
     // let cx = Context::current_with_span(span);
     // let _guard = cx.attach();
     let response = next.run(request).await;
+    let status_code = response.status();
+
+    span.set_attribute(KeyValue::new(
+        HTTP_RESPONSE_STATUS_CODE,
+        status_code.as_u16() as i64,
+    ));
+
+    if status_code.is_server_error() {
+        span.set_status(Status::error(""));
+    }
     response
 }
 
