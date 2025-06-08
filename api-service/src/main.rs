@@ -1,10 +1,10 @@
-use axum::extract::{MatchedPath, Request};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
-use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::{Histogram, MeterProvider};
 use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -20,7 +20,7 @@ use opentelemetry_semantic_conventions::trace::{
 };
 use serde::Serialize;
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::timeout::TimeoutLayer;
@@ -83,21 +83,18 @@ fn init_logs() -> SdkLoggerProvider {
     provider
 }
 
+#[derive(Clone)]
+struct MetricsState {
+    request_duration: Histogram<f64>,
+}
+
 #[tokio::main]
 async fn main() {
     let logger_provider = init_logs();
     let tracer_provider = init_tracer();
     let meter_provider = init_metrics();
 
-    let meter = meter_provider.meter("some-meter");
-    let counter = meter
-        .u64_counter("test_counter")
-        .with_description("display purposes")
-        .build();
-
-    for _ in 0..10 {
-        counter.add(1, &[KeyValue::new("test_key", "test_value")])
-    }
+    let meter = meter_provider.meter("api-service");
 
     let tracer = tracer_provider.tracer("my-tracer");
     tracer.in_span("Main operation", |cx| {
@@ -116,8 +113,18 @@ async fn main() {
 
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
+    let metrics_state = MetricsState {
+        request_duration: meter
+            .f64_histogram("http.server.request.duration")
+            .with_description("Duration of HTTP server requests.")
+            .with_unit("s")
+            .build(),
+    };
     let middleware = ServiceBuilder::new()
-        .layer(axum::middleware::from_fn(telemetry_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            metrics_state.clone(),
+            telemetry_middleware,
+        ))
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::new(Duration::from_secs(10)));
     let app = Router::new().route("/ping", get(ping)).layer(middleware);
@@ -137,13 +144,17 @@ async fn main() {
     let _ = logger_provider.shutdown();
 }
 
-async fn telemetry_middleware(request: Request, next: Next) -> Response {
+async fn telemetry_middleware(
+    State(metrics): State<MetricsState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let start_time = Instant::now();
     let method = request.method().clone();
     let uri = request.uri().clone();
 
     let mut attributes = vec![
         KeyValue::new(HTTP_REQUEST_METHOD, method.to_string()),
-        KeyValue::new(URL_PATH, uri.path().to_string()),
         KeyValue::new(URL_SCHEME, uri.scheme_str().unwrap_or("http").to_string()),
         // TODO: consider trimming HTTP/ from the version
         KeyValue::new(NETWORK_PROTOCOL_VERSION, format!("{:?}", request.version())),
@@ -158,15 +169,18 @@ async fn telemetry_middleware(request: Request, next: Next) -> Response {
         attributes.push(KeyValue::new(HTTP_ROUTE, route.to_owned()));
     }
 
+    let mut trace_attributes = attributes.clone();
+    trace_attributes.push(KeyValue::new(URL_PATH, uri.path().to_string()));
+
     if let Some(query) = uri.query() {
-        attributes.push(KeyValue::new(URL_QUERY, query.to_owned()));
+        trace_attributes.push(KeyValue::new(URL_QUERY, query.to_owned()));
     }
 
     let tracer = global::tracer("api-service");
     let mut span = tracer
         .span_builder(route.map_or(method.to_string(), |route| format!("{method} {route}")))
         .with_kind(SpanKind::Server)
-        .with_attributes(attributes)
+        .with_attributes(trace_attributes)
         .start(&tracer);
 
     // TODO: set required and recommended server span attributes
@@ -177,17 +191,20 @@ async fn telemetry_middleware(request: Request, next: Next) -> Response {
     // let cx = Context::current_with_span(span);
     // let _guard = cx.attach();
     let response = next.run(request).await;
+
+    let duration = start_time.elapsed().as_secs_f64();
     let status_code = response.status();
 
-    span.set_attribute(KeyValue::new(
-        HTTP_RESPONSE_STATUS_CODE,
-        status_code.as_u16() as i64,
-    ));
+    let status_code_attribute =
+        KeyValue::new(HTTP_RESPONSE_STATUS_CODE, status_code.as_u16() as i64);
+    span.set_attribute(status_code_attribute.clone());
+    attributes.push(status_code_attribute);
 
     if status_code.is_server_error() {
         span.set_status(Status::error(""));
     }
 
+    metrics.request_duration.record(duration, &attributes);
     response
 }
 
