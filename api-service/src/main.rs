@@ -117,7 +117,7 @@ async fn main() {
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
     let middleware = ServiceBuilder::new()
-        .layer(axum::middleware::from_fn(root_span_middleware))
+        .layer(axum::middleware::from_fn(telemetry_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::new(Duration::from_secs(10)));
     let app = Router::new().route("/ping", get(ping)).layer(middleware);
@@ -137,7 +137,7 @@ async fn main() {
     let _ = logger_provider.shutdown();
 }
 
-async fn root_span_middleware(request: Request, next: Next) -> Response {
+async fn telemetry_middleware(request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
 
@@ -187,6 +187,7 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
     if status_code.is_server_error() {
         span.set_status(Status::error(""));
     }
+
     response
 }
 
