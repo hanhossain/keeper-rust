@@ -1,5 +1,5 @@
 use axum::extract::{MatchedPath, Request};
-use axum::http::{StatusCode, Version};
+use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::get;
@@ -148,8 +148,13 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
         KeyValue::new(NETWORK_PROTOCOL_VERSION, format!("{:?}", request.version())),
     ];
 
-    if let Some(path) = request.extensions().get::<MatchedPath>() {
-        attributes.push(KeyValue::new(HTTP_ROUTE, path.as_str().to_owned()));
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str());
+
+    if let Some(route) = route {
+        attributes.push(KeyValue::new(HTTP_ROUTE, route.to_owned()));
     }
 
     if let Some(query) = uri.query() {
@@ -158,7 +163,7 @@ async fn root_span_middleware(request: Request, next: Next) -> Response {
 
     let tracer = global::tracer("api-service");
     let _span = tracer
-        .span_builder(format!("{} {}", method, uri.path()))
+        .span_builder(route.map_or(method.to_string(), |route| format!("{method} {route}")))
         .with_kind(SpanKind::Server)
         .with_attributes(attributes)
         .start(&tracer);
