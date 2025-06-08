@@ -14,6 +14,7 @@ use serde::Serialize;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::signal;
+use tower::ServiceBuilder;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::layer::SubscriberExt;
@@ -78,8 +79,8 @@ fn init_logs() -> SdkLoggerProvider {
 async fn main() {
     let logger_provider = init_logs();
     let tracer_provider = init_tracer();
-
     let meter_provider = init_metrics();
+
     let meter = meter_provider.meter("some-meter");
     let counter = meter
         .u64_counter("test_counter")
@@ -107,14 +108,16 @@ async fn main() {
 
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
-    let app = Router::new().route("/ping", get(ping)).layer((
-        TraceLayer::new_for_http(),
-        TimeoutLayer::new(Duration::from_secs(10)),
-    ));
+    let middleware = ServiceBuilder::new()
+        .layer(TraceLayer::new_for_http())
+        .layer(TimeoutLayer::new(Duration::from_secs(10)));
+    let app = Router::new().route("/ping", get(ping)).layer(middleware);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
+
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
