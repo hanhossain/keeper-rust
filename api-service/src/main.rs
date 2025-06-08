@@ -107,8 +107,6 @@ async fn main() {
 
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
-    let _ = meter_provider.shutdown().unwrap();
-
     let app = Router::new().route("/ping", get(ping)).layer((
         TraceLayer::new_for_http(),
         TimeoutLayer::new(Duration::from_secs(10)),
