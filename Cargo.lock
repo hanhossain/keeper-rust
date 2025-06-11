@@ -1118,6 +1118,11 @@ dependencies = [
 [[package]]
 name = "service-common"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+ "tower",
+]
 
 [[package]]
 name = "sharded-slab"
