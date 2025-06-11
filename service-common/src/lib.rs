@@ -4,6 +4,8 @@ use axum::response::Response;
 use opentelemetry::global;
 use opentelemetry::trace::Tracer;
 
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+
 pub async fn telemetry_middleware(request: Request, next: Next) -> Response {
     let method = request.method();
     let route = request
@@ -11,7 +13,7 @@ pub async fn telemetry_middleware(request: Request, next: Next) -> Response {
         .get::<MatchedPath>()
         .map(|p| p.as_str());
 
-    let tracer = global::tracer("");
+    let tracer = global::tracer(PKG_NAME);
 
     let span_name = route.map_or(method.to_string(), |route| format!("{method} {route}"));
     let _span = tracer.span_builder(span_name).start(&tracer);
@@ -21,35 +23,45 @@ pub async fn telemetry_middleware(request: Request, next: Next) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use crate::telemetry_middleware;
+    use super::*;
     use axum::Router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use opentelemetry::global;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
     use tower::ServiceExt;
 
     #[tokio::test]
-    async fn span_path_found() {
+    async fn traces() {
         let exporter = InMemorySpanExporter::default();
-        let provider = SdkTracerProvider::builder()
+        let tracer_provider = SdkTracerProvider::builder()
             .with_simple_exporter(exporter.clone())
             .build();
-        global::set_tracer_provider(provider.clone());
+        global::set_tracer_provider(tracer_provider.clone());
 
         let app = Router::new()
-            .route("/ping", get(|| async { StatusCode::OK }))
+            .route("/ping/{id}", get(|| async { StatusCode::OK }))
             .layer(axum::middleware::from_fn(telemetry_middleware));
 
         let _ = app
-            .oneshot(Request::builder().uri("/ping").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/ping/1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
-        provider.force_flush().unwrap();
+        tracer_provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
 
-        assert_eq!(spans[0].name, "GET /ping");
+        assert_eq!(spans[0].name, "GET /ping/{id}");
+        assert_eq!(
+            spans[0].instrumentation_scope,
+            InstrumentationScope::builder(PKG_NAME).build()
+        );
+        dbg!(spans);
     }
 }
