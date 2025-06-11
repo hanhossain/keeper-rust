@@ -1,8 +1,12 @@
 use axum::extract::{MatchedPath, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use opentelemetry::global;
-use opentelemetry::trace::Tracer;
+use opentelemetry::trace::{Span, SpanKind, Status, Tracer};
+use opentelemetry::{KeyValue, global};
+use opentelemetry_semantic_conventions::attribute::{
+    HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
+    URL_QUERY, URL_SCHEME,
+};
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
@@ -12,13 +16,47 @@ pub async fn telemetry_middleware(request: Request, next: Next) -> Response {
         .extensions()
         .get::<MatchedPath>()
         .map(|p| p.as_str());
+    let scheme = request.uri().scheme_str().unwrap_or("http");
 
     let tracer = global::tracer(PKG_NAME);
 
     let span_name = route.map_or(method.to_string(), |route| format!("{method} {route}"));
-    let _span = tracer.span_builder(span_name).start(&tracer);
 
-    next.run(request).await
+    let mut attributes = vec![
+        KeyValue::new(HTTP_REQUEST_METHOD, method.to_string()),
+        KeyValue::new(URL_SCHEME, scheme.to_string()),
+        // TODO: consider trimming HTTP/ from the version
+        KeyValue::new(NETWORK_PROTOCOL_VERSION, format!("{:?}", request.version())),
+    ];
+
+    if let Some(route) = route {
+        attributes.push(KeyValue::new(HTTP_ROUTE, route.to_owned()));
+    }
+
+    attributes.push(KeyValue::new(URL_PATH, request.uri().path().to_string()));
+
+    if let Some(query) = request.uri().query() {
+        attributes.push(KeyValue::new(URL_QUERY, query.to_owned()));
+    }
+
+    let mut span = tracer
+        .span_builder(span_name)
+        .with_kind(SpanKind::Server)
+        .with_attributes(attributes)
+        .start(&tracer);
+
+    let response = next.run(request).await;
+    let status_code = response.status();
+
+    let status_code_attribute =
+        KeyValue::new(HTTP_RESPONSE_STATUS_CODE, status_code.as_u16() as i64);
+    span.set_attribute(status_code_attribute.clone());
+
+    if status_code.is_server_error() {
+        span.set_status(Status::error(""));
+    }
+
+    response
 }
 
 #[cfg(test)]
@@ -56,12 +94,23 @@ mod tests {
 
         tracer_provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
+        let span = &spans[0];
 
-        assert_eq!(spans[0].name, "GET /ping/{id}");
+        assert_eq!(span.name, "GET /ping/{id}");
+        assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(
-            spans[0].instrumentation_scope,
+            span.instrumentation_scope,
             InstrumentationScope::builder(PKG_NAME).build()
         );
-        dbg!(spans);
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(HTTP_ROUTE, "/ping/{id}"),
+            KeyValue::new(URL_PATH, "/ping/1"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
+        ];
+        assert_eq!(span.attributes, attributes);
     }
 }
