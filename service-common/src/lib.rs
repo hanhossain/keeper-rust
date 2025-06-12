@@ -95,16 +95,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn traces() {
+    async fn traces_basic() {
         let telemetry_context = TelemetryContext::new();
         let app = Router::new()
-            .route("/ping/{id}", get(|| async { StatusCode::OK }))
+            .route("/traces_basic/{id}", get(|| async { StatusCode::OK }))
             .layer(axum::middleware::from_fn(telemetry_middleware));
 
         let _ = app
             .oneshot(
                 Request::builder()
-                    .uri("/ping/1")
+                    .uri("/traces_basic/1")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -115,9 +115,14 @@ mod tests {
             .span_exporter
             .get_finished_spans()
             .unwrap();
-        let span = &spans[0];
 
-        assert_eq!(span.name, "GET /ping/{id}");
+        let span = spans
+            .iter()
+            .filter(|s| s.name == "GET /traces_basic/{id}")
+            .next()
+            .unwrap();
+
+        assert_eq!(span.name, "GET /traces_basic/{id}");
         assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(
             span.instrumentation_scope,
@@ -128,8 +133,107 @@ mod tests {
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
             KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
-            KeyValue::new(HTTP_ROUTE, "/ping/{id}"),
-            KeyValue::new(URL_PATH, "/ping/1"),
+            KeyValue::new(HTTP_ROUTE, "/traces_basic/{id}"),
+            KeyValue::new(URL_PATH, "/traces_basic/1"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
+        ];
+        assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn traces_server_error() {
+        let telemetry_context = TelemetryContext::new();
+        let app = Router::new()
+            .route(
+                "/traces_server_error/{id}",
+                get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            )
+            .layer(axum::middleware::from_fn(telemetry_middleware));
+
+        let _ = app
+            .oneshot(
+                Request::builder()
+                    .uri("/traces_server_error/1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let spans = telemetry_context
+            .span_exporter
+            .get_finished_spans()
+            .unwrap();
+
+        let span = spans
+            .iter()
+            .filter(|s| s.name == "GET /traces_server_error/{id}")
+            .next()
+            .unwrap();
+
+        assert_eq!(span.name, "GET /traces_server_error/{id}");
+        assert_eq!(span.span_kind, SpanKind::Server);
+        assert_eq!(
+            span.instrumentation_scope,
+            InstrumentationScope::builder(PKG_NAME).build()
+        );
+        assert_eq!(span.status, Status::error(""));
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(HTTP_ROUTE, "/traces_server_error/{id}"),
+            KeyValue::new(URL_PATH, "/traces_server_error/1"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
+        ];
+        assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn traces_url_query() {
+        let telemetry_context = TelemetryContext::new();
+        let app = Router::new()
+            .route("/traces_url_query", get(|| async { StatusCode::OK }))
+            .layer(axum::middleware::from_fn(telemetry_middleware));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/traces_url_query?query=value")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let spans = telemetry_context
+            .span_exporter
+            .get_finished_spans()
+            .unwrap();
+
+        let span = spans
+            .iter()
+            .filter(|s| s.name == "GET /traces_url_query")
+            .next()
+            .unwrap();
+
+        assert_eq!(span.name, "GET /traces_url_query");
+        assert_eq!(span.span_kind, SpanKind::Server);
+        assert_eq!(
+            span.instrumentation_scope,
+            InstrumentationScope::builder(PKG_NAME).build()
+        );
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(HTTP_ROUTE, "/traces_url_query"),
+            KeyValue::new(URL_PATH, "/traces_url_query"),
+            KeyValue::new(URL_QUERY, "query=value"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
         ];
         assert_eq!(span.attributes, attributes);
