@@ -68,16 +68,35 @@ mod tests {
     use axum::routing::get;
     use opentelemetry::InstrumentationScope;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+    use std::sync::OnceLock;
     use tower::ServiceExt;
+
+    static TELEMETRY_CONTEXT: OnceLock<TelemetryContext> = OnceLock::new();
+
+    #[derive(Clone)]
+    struct TelemetryContext {
+        span_exporter: InMemorySpanExporter,
+    }
+
+    impl TelemetryContext {
+        fn new() -> TelemetryContext {
+            TELEMETRY_CONTEXT
+                .get_or_init(|| {
+                    let span_exporter = InMemorySpanExporter::default();
+                    let tracer_provider = SdkTracerProvider::builder()
+                        .with_simple_exporter(span_exporter.clone())
+                        .build();
+                    global::set_tracer_provider(tracer_provider);
+
+                    TelemetryContext { span_exporter }
+                })
+                .clone()
+        }
+    }
 
     #[tokio::test]
     async fn traces() {
-        let exporter = InMemorySpanExporter::default();
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_simple_exporter(exporter.clone())
-            .build();
-        global::set_tracer_provider(tracer_provider.clone());
-
+        let telemetry_context = TelemetryContext::new();
         let app = Router::new()
             .route("/ping/{id}", get(|| async { StatusCode::OK }))
             .layer(axum::middleware::from_fn(telemetry_middleware));
@@ -92,8 +111,10 @@ mod tests {
             .await
             .unwrap();
 
-        tracer_provider.force_flush().unwrap();
-        let spans = exporter.get_finished_spans().unwrap();
+        let spans = telemetry_context
+            .span_exporter
+            .get_finished_spans()
+            .unwrap();
         let span = &spans[0];
 
         assert_eq!(span.name, "GET /ping/{id}");
