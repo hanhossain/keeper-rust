@@ -96,9 +96,9 @@ where
             .with_attributes(attributes)
             .start(&self.tracer);
 
-        let f = self.inner.call(request);
+        let future = self.inner.call(request);
         Box::pin(async move {
-            let response = f.await?;
+            let response = future.await?;
 
             span.set_attribute(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
