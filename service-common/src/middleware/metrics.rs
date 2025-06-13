@@ -109,7 +109,9 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::routing::get;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+    use std::collections::HashMap;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -129,9 +131,30 @@ mod tests {
             .unwrap();
 
         provider.force_flush().unwrap();
-        let metrics = exporter.get_finished_metrics().unwrap();
-        dbg!(metrics);
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        assert_eq!(resource_metrics.len(), 1);
 
-        assert!(false)
+        let scope_metrics = resource_metrics[0].scope_metrics().next().unwrap();
+        assert_eq!(scope_metrics.scope().name(), PKG_NAME);
+
+        let metrics: HashMap<_, _> = scope_metrics.metrics().map(|m| (m.name(), m)).collect();
+        let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
+
+        let metric_data = match metric.data() {
+            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
+            _ => panic!("wrong metric data type"),
+        };
+        let data_point = metric_data.data_points().next().unwrap();
+        assert_eq!(data_point.count(), 1);
+
+        let attributes: Vec<_> = data_point.attributes().cloned().collect();
+        let expected_attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
+            KeyValue::new(HTTP_ROUTE, "/"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(URL_SCHEME, "http"),
+        ];
+        assert_eq!(attributes, expected_attributes);
     }
 }
