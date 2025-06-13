@@ -98,7 +98,7 @@ mod tests {
     use tower::ServiceExt;
 
     #[tokio::test]
-    async fn basic_root_span() {
+    async fn root_span_single_request() {
         let exporter = InMemorySpanExporter::default();
         let provider = SdkTracerProvider::builder()
             .with_simple_exporter(exporter.clone())
@@ -117,8 +117,8 @@ mod tests {
         let spans = exporter.get_finished_spans().unwrap();
 
         assert_eq!(spans.len(), 1);
-        let span = &spans[0];
 
+        let span = &spans[0];
         assert_eq!(span.name, "GET /");
         assert_eq!(span.parent_span_id, SpanId::from_u64(0));
         assert_eq!(span.span_kind, SpanKind::Server);
@@ -128,5 +128,46 @@ mod tests {
             span.attributes,
             vec![KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200)]
         );
+    }
+
+    #[tokio::test]
+    async fn root_spans_multiple_requests() {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+
+        let mut app = Router::new()
+            .route("/foo", get(|| async {}))
+            .route("/bar", get(|| async {}))
+            .layer(RequestTraceLayer::new(provider.clone()));
+
+        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+            .await
+            .unwrap()
+            .call(Request::builder().uri("/foo").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+            .await
+            .unwrap()
+            .call(Request::builder().uri("/bar").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        dbg!(&spans);
+
+        assert_eq!(spans.len(), 2);
+
+        let span = &spans[0];
+        assert_eq!(span.name, "GET /foo");
+        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+
+        let span = &spans[1];
+        assert_eq!(span.name, "GET /bar");
+        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
     }
 }
