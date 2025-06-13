@@ -111,7 +111,7 @@ mod tests {
     use axum::routing::get;
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -147,14 +147,14 @@ mod tests {
         let data_point = metric_data.data_points().next().unwrap();
         assert_eq!(data_point.count(), 1);
 
-        let attributes: Vec<_> = data_point.attributes().cloned().collect();
-        let expected_attributes = vec![
+        let attributes: HashSet<_> = data_point.attributes().cloned().collect();
+        let expected_attributes = HashSet::from([
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
             KeyValue::new(URL_SCHEME, "http"),
-        ];
+        ]);
         assert_eq!(attributes, expected_attributes);
     }
 }

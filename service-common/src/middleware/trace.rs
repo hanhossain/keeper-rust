@@ -192,7 +192,6 @@ mod tests {
 
         provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
-        dbg!(&spans);
 
         assert_eq!(spans.len(), 2);
 
