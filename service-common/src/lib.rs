@@ -1,3 +1,5 @@
+pub mod middleware;
+
 use axum::extract::{MatchedPath, Request};
 use axum::middleware::Next;
 use axum::response::Response;

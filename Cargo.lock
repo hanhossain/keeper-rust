@@ -1122,6 +1122,7 @@ name = "service-common"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "futures-util",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
