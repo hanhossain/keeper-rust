@@ -1,1 +1,1 @@
-mod trace;
+pub mod trace;

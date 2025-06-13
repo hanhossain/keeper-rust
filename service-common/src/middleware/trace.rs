@@ -9,12 +9,12 @@ use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
 #[derive(Clone)]
-struct RequestTraceLayer<T> {
+pub struct RequestTraceLayer<T> {
     tracer: T,
 }
 
 impl<T> RequestTraceLayer<T> {
-    fn new<P>(tracer_provider: P) -> RequestTraceLayer<T>
+    pub fn new<P>(tracer_provider: P) -> RequestTraceLayer<T>
     where
         T: Tracer,
         P: TracerProvider<Tracer = T>,
@@ -39,7 +39,7 @@ where
 }
 
 #[derive(Clone)]
-struct RequestTraceMiddleware<S, T> {
+pub struct RequestTraceMiddleware<S, T> {
     inner: S,
     tracer: T,
 }
