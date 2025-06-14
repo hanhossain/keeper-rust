@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_span() {
+    async fn child_spans() {
         let exporter = InMemorySpanExporter::default();
         let provider = SdkTracerProvider::builder()
             .with_simple_exporter(exporter.clone())
@@ -391,10 +391,13 @@ mod tests {
                 "/",
                 get(|| async move {
                     let tracer = provider2.tracer("test");
-                    tracer.in_span("child span", |cx| {
+                    tracer.in_span("child span 1", |cx| {
                         let span = cx.span();
-                        span.add_event("from child span", Vec::new());
+                        span.add_event("from child span 1", Vec::new());
                     });
+
+                    let mut span = tracer.start("child span 2");
+                    span.add_event("from child span 2", Vec::new());
                 }),
             )
             .layer(RequestTraceLayer::new_with_provider(provider.clone()));
@@ -408,24 +411,36 @@ mod tests {
         let spans = exporter.get_finished_spans().unwrap();
         dbg!(&spans);
 
-        assert_eq!(spans.len(), 2);
+        assert_eq!(spans.len(), 3);
 
-        let child = &spans[0];
-        let parent = &spans[1];
+        let child1 = &spans[0];
+        let child2 = &spans[1];
+        let parent = &spans[2];
 
         // verify parent span
         assert_eq!(parent.name, "GET /");
         assert_eq!(parent.parent_span_id, SpanId::from_u64(0));
         assert_eq!(parent.instrumentation_scope.name(), PKG_NAME);
 
-        // verify child span
-        assert_eq!(child.name, "child span");
-        assert_eq!(child.parent_span_id, parent.span_context.span_id());
-        assert_eq!(child.instrumentation_scope.name(), "test");
+        // verify child span 1
+        assert_eq!(child1.name, "child span 1");
+        assert_eq!(child1.parent_span_id, parent.span_context.span_id());
+        assert_eq!(child1.instrumentation_scope.name(), "test");
         assert_eq!(
-            child.span_context.trace_id(),
+            child1.span_context.trace_id(),
             parent.span_context.trace_id()
         );
-        assert_eq!(child.events.events[0].name, "from child span");
+        assert_eq!(child1.events.events[0].name, "from child span 1");
+
+        // verify child span 2
+        assert_eq!(child2.name, "child span 2");
+        assert_eq!(child2.parent_span_id, parent.span_context.span_id());
+        assert_eq!(child2.instrumentation_scope.name(), "test");
+        assert_eq!(
+            child2.span_context.trace_id(),
+            parent.span_context.trace_id()
+        );
+        assert_eq!(child2.events.events[0].name, "from child span 2");
+        assert_ne!(child2.span_context.span_id(), child1.span_context.span_id());
     }
 }
