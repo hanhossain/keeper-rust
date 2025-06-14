@@ -422,6 +422,16 @@ mod tests {
         assert_eq!(parent.parent_span_id, SpanId::from_u64(0));
         assert_eq!(parent.instrumentation_scope.name(), PKG_NAME);
 
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(HTTP_ROUTE, "/"),
+            KeyValue::new(URL_PATH, "/"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
+        ];
+        assert_eq!(parent.attributes, attributes);
+
         // verify child span 1
         assert_eq!(child1.name, "child span 1");
         assert_eq!(child1.parent_span_id, parent.span_context.span_id());
