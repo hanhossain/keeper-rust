@@ -2,14 +2,16 @@ use crate::PKG_NAME;
 use axum::extract::{MatchedPath, Request};
 use axum::response::Response;
 use futures_util::future::BoxFuture;
+use opentelemetry::context::FutureExt;
 use opentelemetry::global::BoxedTracer;
-use opentelemetry::trace::{Span, SpanKind, Status, Tracer, TracerProvider};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_semantic_conventions::attribute::{
     HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
     URL_QUERY, URL_SCHEME,
 };
-use std::task::{Context, Poll};
+use std::task;
+use std::task::Poll;
 use tower::{Layer, Service};
 
 #[derive(Clone)]
@@ -59,13 +61,13 @@ where
     S: Service<Request, Response = Response> + Send + 'static,
     S::Future: Send + 'static,
     T: Tracer<Span = Sp>,
-    Sp: Span + Send + 'static,
+    Sp: Span + Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
@@ -96,25 +98,28 @@ where
             attributes.push(KeyValue::new(URL_QUERY, query.to_owned()));
         }
 
-        let mut span = self
+        let span = self
             .tracer
             .span_builder(span_name)
             .with_kind(SpanKind::Server)
             .with_attributes(attributes)
             .start(&self.tracer);
 
-        let future = self.inner.call(request);
+        let cx = Context::current_with_span(span);
+        let future = self.inner.call(request).with_context(cx);
         Box::pin(async move {
             let response = future.await?;
 
-            span.set_attribute(KeyValue::new(
-                HTTP_RESPONSE_STATUS_CODE,
-                response.status().as_u16() as i64,
-            ));
+            Context::map_current(|cx| {
+                cx.span().set_attribute(KeyValue::new(
+                    HTTP_RESPONSE_STATUS_CODE,
+                    response.status().as_u16() as i64,
+                ));
 
-            if response.status().is_server_error() {
-                span.set_status(Status::error(""));
-            }
+                if response.status().is_server_error() {
+                    cx.span().set_status(Status::error(""));
+                }
+            });
 
             Ok(response)
         })
@@ -129,6 +134,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::get;
     use opentelemetry::SpanId;
+    use opentelemetry::trace::get_active_span;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
     use tower::ServiceExt;
 
@@ -335,5 +341,40 @@ mod tests {
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
         ];
         assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn root_span_from_async_thread() {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+
+        let app = Router::new()
+            .route(
+                "/",
+                get(|| async {
+                    get_active_span(|span| {
+                        span.add_event("hello", Vec::new());
+                    })
+                }),
+            )
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
+
+        let _ = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        dbg!(&spans);
+
+        assert_eq!(spans.len(), 1);
+
+        let span = &spans[0];
+        assert_eq!(span.name, "GET /");
+        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.events.events[0].name, "hello");
     }
 }
