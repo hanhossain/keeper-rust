@@ -377,4 +377,55 @@ mod tests {
         assert_eq!(span.parent_span_id, SpanId::from_u64(0));
         assert_eq!(span.events.events[0].name, "hello");
     }
+
+    #[tokio::test]
+    async fn child_span() {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let provider2 = provider.clone();
+
+        let app = Router::new()
+            .route(
+                "/",
+                get(|| async move {
+                    let tracer = provider2.tracer("test");
+                    tracer.in_span("child span", |cx| {
+                        let span = cx.span();
+                        span.add_event("from child span", Vec::new());
+                    });
+                }),
+            )
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
+
+        let _ = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        dbg!(&spans);
+
+        assert_eq!(spans.len(), 2);
+
+        let child = &spans[0];
+        let parent = &spans[1];
+
+        // verify parent span
+        assert_eq!(parent.name, "GET /");
+        assert_eq!(parent.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(parent.instrumentation_scope.name(), PKG_NAME);
+
+        // verify child span
+        assert_eq!(child.name, "child span");
+        assert_eq!(child.parent_span_id, parent.span_context.span_id());
+        assert_eq!(child.instrumentation_scope.name(), "test");
+        assert_eq!(
+            child.span_context.trace_id(),
+            parent.span_context.trace_id()
+        );
+        assert_eq!(child.events.events[0].name, "from child span");
+    }
 }
