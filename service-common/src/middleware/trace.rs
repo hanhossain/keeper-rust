@@ -2,8 +2,9 @@ use crate::PKG_NAME;
 use axum::extract::{MatchedPath, Request};
 use axum::response::Response;
 use futures_util::future::BoxFuture;
-use opentelemetry::KeyValue;
+use opentelemetry::global::BoxedTracer;
 use opentelemetry::trace::{Span, SpanKind, Status, Tracer, TracerProvider};
+use opentelemetry::{KeyValue, global};
 use opentelemetry_semantic_conventions::attribute::{
     HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
     URL_QUERY, URL_SCHEME,
@@ -16,8 +17,14 @@ pub struct RequestTraceLayer<T> {
     tracer: T,
 }
 
+impl RequestTraceLayer<BoxedTracer> {
+    pub fn new() -> Self {
+        Self::new_with_provider(global::tracer_provider())
+    }
+}
+
 impl<T> RequestTraceLayer<T> {
-    pub fn new<P>(tracer_provider: P) -> RequestTraceLayer<T>
+    pub fn new_with_provider<P>(tracer_provider: P) -> RequestTraceLayer<T>
     where
         T: Tracer,
         P: TracerProvider<Tracer = T>,
@@ -134,7 +141,7 @@ mod tests {
 
         let app = Router::new()
             .route("/", get(|| async {}))
-            .layer(RequestTraceLayer::new(provider.clone()));
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
 
         let _ = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -174,7 +181,7 @@ mod tests {
         let mut app = Router::new()
             .route("/foo", get(|| async {}))
             .route("/bar", get(|| async {}))
-            .layer(RequestTraceLayer::new(provider.clone()));
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
 
         let _ = ServiceExt::<Request<Body>>::ready(&mut app)
             .await
@@ -213,7 +220,7 @@ mod tests {
 
         let app = Router::new()
             .route("/foo/{id}", get(|| async {}))
-            .layer(RequestTraceLayer::new(provider.clone()));
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
 
         let _ = app
             .oneshot(
@@ -256,7 +263,7 @@ mod tests {
 
         let app = Router::new()
             .route("/foo", get(|| async {}))
-            .layer(RequestTraceLayer::new(provider.clone()));
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
 
         let _ = app
             .oneshot(
@@ -300,7 +307,7 @@ mod tests {
 
         let app = Router::new()
             .route("/", get(|| async { StatusCode::INTERNAL_SERVER_ERROR }))
-            .layer(RequestTraceLayer::new(provider.clone()));
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
 
         let _ = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())

@@ -3,8 +3,8 @@ use axum::extract::{MatchedPath, Request};
 use axum::http::{Method, StatusCode, Version};
 use axum::response::Response;
 use futures_util::future::BoxFuture;
-use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Histogram, MeterProvider, UpDownCounter};
+use opentelemetry::metrics::{Histogram, Meter, MeterProvider, UpDownCounter};
+use opentelemetry::{KeyValue, global};
 use opentelemetry_semantic_conventions::attribute::{
     HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION,
     URL_SCHEME,
@@ -17,17 +17,13 @@ use std::time::Instant;
 use tower::{Layer, Service};
 
 #[derive(Clone)]
-pub struct RequestMetricsLayer {
+struct RequestMetrics {
     request_duration: Histogram<f64>,
     active_requests: UpDownCounter<i64>,
 }
 
-impl RequestMetricsLayer {
-    pub fn new<P>(meter_provider: P) -> RequestMetricsLayer
-    where
-        P: MeterProvider,
-    {
-        let meter = meter_provider.meter(PKG_NAME);
+impl RequestMetrics {
+    fn new(meter: Meter) -> Self {
         let request_duration = meter
             .f64_histogram(HTTP_SERVER_REQUEST_DURATION)
             .with_description("Duration of HTTP server requests.")
@@ -42,10 +38,32 @@ impl RequestMetricsLayer {
             .with_unit("{request}")
             .build();
 
-        RequestMetricsLayer {
+        RequestMetrics {
             request_duration,
             active_requests,
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct RequestMetricsLayer {
+    metrics: RequestMetrics,
+}
+
+impl RequestMetricsLayer {
+    pub fn new() -> RequestMetricsLayer {
+        let meter = global::meter(PKG_NAME);
+        let metrics = RequestMetrics::new(meter);
+        RequestMetricsLayer { metrics }
+    }
+
+    pub fn new_with_provider<P>(meter_provider: P) -> RequestMetricsLayer
+    where
+        P: MeterProvider,
+    {
+        let meter = meter_provider.meter(PKG_NAME);
+        let metrics = RequestMetrics::new(meter);
+        RequestMetricsLayer { metrics }
     }
 }
 
@@ -55,8 +73,7 @@ impl<S> Layer<S> for RequestMetricsLayer {
     fn layer(&self, inner: S) -> Self::Service {
         RequestMetricsMiddleware {
             inner,
-            request_duration: self.request_duration.clone(),
-            active_requests: self.active_requests.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -64,8 +81,7 @@ impl<S> Layer<S> for RequestMetricsLayer {
 #[derive(Clone)]
 pub struct RequestMetricsMiddleware<S> {
     inner: S,
-    request_duration: Histogram<f64>,
-    active_requests: UpDownCounter<i64>,
+    metrics: RequestMetrics,
 }
 
 impl<S> Service<Request> for RequestMetricsMiddleware<S>
@@ -90,7 +106,9 @@ where
             .with_method(method)
             .with_scheme(scheme)
             .build();
-        self.active_requests.add(1, &active_requests_attributes);
+        self.metrics
+            .active_requests
+            .add(1, &active_requests_attributes);
 
         let route = request
             .extensions()
@@ -103,8 +121,7 @@ where
             .with_version(request.version())
             .with_route(route);
 
-        let active_requests = self.active_requests.clone();
-        let request_duration = self.request_duration.clone();
+        let metrics = self.metrics.clone();
         let future = self.inner.call(request);
         Box::pin(async move {
             let response = future.await?;
@@ -113,12 +130,12 @@ where
                 .with_status(response.status())
                 .build();
 
-            request_duration.record(
+            metrics.request_duration.record(
                 start_time.elapsed().as_secs_f64(),
                 &request_duration_attributes,
             );
 
-            active_requests.add(-1, &active_requests_attributes);
+            metrics.active_requests.add(-1, &active_requests_attributes);
             Ok(response)
         })
     }
@@ -206,7 +223,7 @@ mod tests {
 
         let app = Router::new()
             .route("/", get(|| async {}))
-            .layer(RequestMetricsLayer::new(provider.clone()));
+            .layer(RequestMetricsLayer::new_with_provider(provider.clone()));
 
         let _ = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -256,7 +273,7 @@ mod tests {
                     provider2.force_flush().unwrap();
                 }),
             )
-            .layer(RequestMetricsLayer::new(provider.clone()));
+            .layer(RequestMetricsLayer::new_with_provider(provider.clone()));
 
         let _ = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
