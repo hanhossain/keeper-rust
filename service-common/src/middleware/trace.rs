@@ -106,20 +106,18 @@ where
             .start(&self.tracer);
 
         let cx = Context::current_with_span(span);
-        let future = self.inner.call(request).with_context(cx);
+        let future = self.inner.call(request).with_context(cx.clone());
         Box::pin(async move {
             let response = future.await?;
+            let span = cx.span();
+            span.set_attribute(KeyValue::new(
+                HTTP_RESPONSE_STATUS_CODE,
+                response.status().as_u16() as i64,
+            ));
 
-            Context::map_current(|cx| {
-                cx.span().set_attribute(KeyValue::new(
-                    HTTP_RESPONSE_STATUS_CODE,
-                    response.status().as_u16() as i64,
-                ));
-
-                if response.status().is_server_error() {
-                    cx.span().set_status(Status::error(""));
-                }
-            });
+            if response.status().is_server_error() {
+                span.set_status(Status::error(""));
+            }
 
             Ok(response)
         })
