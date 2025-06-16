@@ -312,6 +312,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn simple_global() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter.clone())
+            .build();
+        global::set_meter_provider(provider.clone());
+
+        let app = Router::new()
+            .route("/", get(|| async {}))
+            .layer(RequestMetricsLayer::new());
+
+        let _ = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        assert_eq!(resource_metrics.len(), 1);
+
+        let scope_metrics: Vec<_> = resource_metrics[0].scope_metrics().collect();
+        assert_eq!(scope_metrics.len(), 1);
+        assert_eq!(scope_metrics[0].scope().name(), PKG_NAME);
+
+        let metrics: HashSet<_> = scope_metrics[0].metrics().map(|m| m.name()).collect();
+        assert_eq!(
+            metrics,
+            HashSet::from([HTTP_SERVER_REQUEST_DURATION, HTTP_SERVER_ACTIVE_REQUESTS])
+        );
+    }
+
+    #[tokio::test]
     async fn two_requests_in_one_export() {
         let exporter = InMemoryMetricExporter::default();
         let provider = SdkMeterProvider::builder()
