@@ -211,6 +211,7 @@ mod tests {
     use axum::routing::get;
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+    use pretty_assertions::assert_eq;
     use std::collections::{HashMap, HashSet};
     use tower::ServiceExt;
 

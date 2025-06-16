@@ -136,6 +136,7 @@ mod tests {
     use opentelemetry::SpanId;
     use opentelemetry::trace::get_active_span;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+    use pretty_assertions::{assert_eq, assert_ne};
     use tower::ServiceExt;
 
     #[tokio::test]
