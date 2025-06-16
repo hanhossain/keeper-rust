@@ -310,4 +310,49 @@ mod tests {
             is_active = false;
         }
     }
+
+    #[tokio::test]
+    async fn two_requests_in_one_export() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter.clone())
+            .build();
+
+        let mut app = Router::new()
+            .route("/", get(|| async {}))
+            .layer(RequestMetricsLayer::new_with_provider(provider.clone()));
+
+        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+            .await
+            .unwrap()
+            .call(request)
+            .await
+            .unwrap();
+
+        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+            .await
+            .unwrap()
+            .call(request)
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        assert_eq!(resource_metrics.len(), 1);
+
+        let scope_metrics: Vec<_> = resource_metrics[0].scope_metrics().collect();
+        assert_eq!(scope_metrics.len(), 1);
+
+        let metrics: HashMap<_, _> = scope_metrics[0].metrics().map(|m| (m.name(), m)).collect();
+
+        let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
+        let metric_data = match metric.data() {
+            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
+            _ => panic!("wrong metric data type"),
+        };
+        let data_point = metric_data.data_points().next().unwrap();
+        assert_eq!(data_point.count(), 2);
+    }
 }
