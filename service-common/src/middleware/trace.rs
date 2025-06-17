@@ -3,8 +3,8 @@ use axum::extract::{MatchedPath, Request};
 use axum::response::Response;
 use futures_util::future::BoxFuture;
 use opentelemetry::context::FutureExt;
-use opentelemetry::global::BoxedTracer;
-use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::global::GlobalTracerProvider;
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_semantic_conventions::attribute::{
     HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
@@ -15,53 +15,45 @@ use std::task::Poll;
 use tower::{Layer, Service};
 
 #[derive(Clone)]
-pub struct RequestTraceLayer<T> {
-    tracer: T,
+pub struct RequestTraceLayer<P> {
+    tracer_provider: P,
 }
 
-impl RequestTraceLayer<BoxedTracer> {
+impl RequestTraceLayer<GlobalTracerProvider> {
     pub fn new() -> Self {
         Self::new_with_provider(global::tracer_provider())
     }
 }
 
-impl<T> RequestTraceLayer<T> {
-    pub fn new_with_provider<P>(tracer_provider: P) -> RequestTraceLayer<T>
-    where
-        T: Tracer,
-        P: TracerProvider<Tracer = T>,
-    {
-        let tracer = tracer_provider.tracer(PKG_NAME);
-        RequestTraceLayer { tracer }
+impl<P> RequestTraceLayer<P> {
+    pub fn new_with_provider(tracer_provider: P) -> RequestTraceLayer<P> {
+        RequestTraceLayer { tracer_provider }
     }
 }
 
-impl<S, T> Layer<S> for RequestTraceLayer<T>
-where
-    T: Clone,
-{
-    type Service = RequestTraceMiddleware<S, T>;
+impl<S, P: Clone> Layer<S> for RequestTraceLayer<P> {
+    type Service = RequestTraceMiddleware<S, P>;
 
     fn layer(&self, inner: S) -> Self::Service {
         RequestTraceMiddleware {
             inner,
-            tracer: self.tracer.clone(),
+            tracer_provider: self.tracer_provider.clone(),
         }
     }
 }
 
 #[derive(Clone)]
-pub struct RequestTraceMiddleware<S, T> {
+pub struct RequestTraceMiddleware<S, P> {
     inner: S,
-    tracer: T,
+    tracer_provider: P,
 }
 
-impl<S, T, Sp> Service<Request> for RequestTraceMiddleware<S, T>
+impl<S, P> Service<Request> for RequestTraceMiddleware<S, P>
 where
     S: Service<Request, Response = Response> + Send + 'static,
     S::Future: Send + 'static,
-    T: Tracer<Span = Sp>,
-    Sp: Span + Send + Sync + 'static,
+    P: TracerProvider,
+    <<P as TracerProvider>::Tracer as Tracer>::Span: Send + Sync + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -98,12 +90,13 @@ where
             attributes.push(KeyValue::new(URL_QUERY, query.to_owned()));
         }
 
-        let span = self
-            .tracer
+        let tracer = self.tracer_provider.tracer(PKG_NAME);
+
+        let span = tracer
             .span_builder(span_name)
             .with_kind(SpanKind::Server)
             .with_attributes(attributes)
-            .start(&self.tracer);
+            .start(&tracer);
 
         let cx = Context::current_with_span(span);
         let future = self.inner.call(request).with_context(cx.clone());
@@ -144,7 +137,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::get;
     use opentelemetry::SpanId;
-    use opentelemetry::trace::get_active_span;
+    use opentelemetry::trace::{Span, get_active_span};
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
     use pretty_assertions::{assert_eq, assert_ne};
     use tower::ServiceExt;
@@ -159,6 +152,46 @@ mod tests {
         let app = Router::new()
             .route("/", get(|| async {}))
             .layer(RequestTraceLayer::new_with_provider(provider.clone()));
+
+        let _ = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+
+        assert_eq!(spans.len(), 1);
+
+        let span = &spans[0];
+        assert_eq!(span.name, "GET /");
+        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.span_kind, SpanKind::Server);
+        assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
+        assert_eq!(span.status, Status::Unset);
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(HTTP_ROUTE, "/"),
+            KeyValue::new(URL_PATH, "/"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
+        ];
+        assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn root_span_single_request_global_tracer() {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        global::set_tracer_provider(provider.clone());
+
+        let app = Router::new()
+            .route("/", get(|| async {}))
+            .layer(RequestTraceLayer::new());
 
         let _ = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
