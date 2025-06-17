@@ -48,9 +48,9 @@ pub struct RequestTraceMiddleware<S, P> {
     tracer_provider: P,
 }
 
-impl<S, P> Service<Request> for RequestTraceMiddleware<S, P>
+impl<S, P, B> Service<Request> for RequestTraceMiddleware<S, P>
 where
-    S: Service<Request, Response = Response> + Send + 'static,
+    S: Service<Request, Response = Response<B>> + Send + 'static,
     S::Future: Send + 'static,
     P: TracerProvider,
     <<P as TracerProvider>::Tracer as Tracer>::Span: Send + Sync + 'static,

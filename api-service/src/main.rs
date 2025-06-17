@@ -1,11 +1,7 @@
-use axum::extract::{MatchedPath, Request, State};
 use axum::http::StatusCode;
-use axum::middleware::Next;
-use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
-use opentelemetry::metrics::{Histogram, MeterProvider};
-use opentelemetry::trace::{Span, SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
@@ -13,14 +9,11 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_semantic_conventions::attribute::URL_QUERY;
-use opentelemetry_semantic_conventions::trace::{
-    HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
-    URL_SCHEME,
-};
 use serde::Serialize;
+use service_common::middleware::metrics::RequestMetricsLayer;
+use service_common::middleware::trace::RequestTraceLayer;
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::timeout::TimeoutLayer;
@@ -83,18 +76,11 @@ fn init_logs() -> SdkLoggerProvider {
     provider
 }
 
-#[derive(Clone)]
-struct MetricsState {
-    request_duration: Histogram<f64>,
-}
-
 #[tokio::main]
 async fn main() {
     let logger_provider = init_logs();
     let tracer_provider = init_tracer();
     let meter_provider = init_metrics();
-
-    let meter = meter_provider.meter("api-service");
 
     let tracer = tracer_provider.tracer("my-tracer");
     tracer.in_span("Main operation", |cx| {
@@ -113,21 +99,9 @@ async fn main() {
 
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 
-    let metrics_state = MetricsState {
-        request_duration: meter
-            .f64_histogram("http.server.request.duration")
-            .with_description("Duration of HTTP server requests.")
-            .with_unit("s")
-            .with_boundaries(vec![
-                0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
-            ])
-            .build(),
-    };
     let middleware = ServiceBuilder::new()
-        .layer(axum::middleware::from_fn_with_state(
-            metrics_state.clone(),
-            telemetry_middleware,
-        ))
+        .layer(RequestTraceLayer::new())
+        .layer(RequestMetricsLayer::new())
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::new(Duration::from_secs(10)));
     let app = Router::new().route("/ping", get(ping)).layer(middleware);
@@ -145,70 +119,6 @@ async fn main() {
     let _ = tracer_provider.shutdown();
     let _ = meter_provider.shutdown();
     let _ = logger_provider.shutdown();
-}
-
-async fn telemetry_middleware(
-    State(metrics): State<MetricsState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let start_time = Instant::now();
-    let method = request.method().clone();
-    let uri = request.uri().clone();
-
-    let mut attributes = vec![
-        KeyValue::new(HTTP_REQUEST_METHOD, method.to_string()),
-        KeyValue::new(URL_SCHEME, uri.scheme_str().unwrap_or("http").to_string()),
-        // TODO: consider trimming HTTP/ from the version
-        KeyValue::new(NETWORK_PROTOCOL_VERSION, format!("{:?}", request.version())),
-    ];
-
-    let route = request
-        .extensions()
-        .get::<MatchedPath>()
-        .map(|p| p.as_str());
-
-    if let Some(route) = route {
-        attributes.push(KeyValue::new(HTTP_ROUTE, route.to_owned()));
-    }
-
-    let mut trace_attributes = attributes.clone();
-    trace_attributes.push(KeyValue::new(URL_PATH, uri.path().to_string()));
-
-    if let Some(query) = uri.query() {
-        trace_attributes.push(KeyValue::new(URL_QUERY, query.to_owned()));
-    }
-
-    let tracer = global::tracer("api-service");
-    let mut span = tracer
-        .span_builder(route.map_or(method.to_string(), |route| format!("{method} {route}")))
-        .with_kind(SpanKind::Server)
-        .with_attributes(trace_attributes)
-        .start(&tracer);
-
-    // TODO: set required and recommended server span attributes
-    // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span
-    // error.type
-
-    // TODO: do I need to set the context?
-    // let cx = Context::current_with_span(span);
-    // let _guard = cx.attach();
-    let response = next.run(request).await;
-
-    let duration = start_time.elapsed().as_secs_f64();
-    let status_code = response.status();
-
-    let status_code_attribute =
-        KeyValue::new(HTTP_RESPONSE_STATUS_CODE, status_code.as_u16() as i64);
-    span.set_attribute(status_code_attribute.clone());
-    attributes.push(status_code_attribute);
-
-    if status_code.is_server_error() {
-        span.set_status(Status::error(""));
-    }
-
-    metrics.request_duration.record(duration, &attributes);
-    response
 }
 
 async fn shutdown_signal() {

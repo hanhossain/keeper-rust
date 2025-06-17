@@ -84,9 +84,9 @@ pub struct RequestMetricsMiddleware<S> {
     metrics: RequestMetrics,
 }
 
-impl<S> Service<Request> for RequestMetricsMiddleware<S>
+impl<S, B> Service<Request> for RequestMetricsMiddleware<S>
 where
-    S: Service<Request, Response = Response> + Send + 'static,
+    S: Service<Request, Response = Response<B>> + Send + 'static,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
