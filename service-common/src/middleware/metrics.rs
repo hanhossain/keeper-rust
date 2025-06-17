@@ -355,7 +355,7 @@ mod tests {
             .layer(RequestMetricsLayer::new_with_provider(provider.clone()));
 
         let request = Request::builder().uri("/").body(Body::empty()).unwrap();
-        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+        let _ = ServiceExt::<Request>::ready(&mut app)
             .await
             .unwrap()
             .call(request)
@@ -363,7 +363,7 @@ mod tests {
             .unwrap();
 
         let request = Request::builder().uri("/").body(Body::empty()).unwrap();
-        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+        let _ = ServiceExt::<Request>::ready(&mut app)
             .await
             .unwrap()
             .call(request)

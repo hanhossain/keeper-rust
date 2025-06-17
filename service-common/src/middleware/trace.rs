@@ -233,14 +233,14 @@ mod tests {
             .route("/bar", get(|| async {}))
             .layer(RequestTraceLayer::new_with_provider(provider.clone()));
 
-        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+        let _ = ServiceExt::<Request>::ready(&mut app)
             .await
             .unwrap()
             .call(Request::builder().uri("/foo").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
-        let _ = ServiceExt::<Request<Body>>::ready(&mut app)
+        let _ = ServiceExt::<Request>::ready(&mut app)
             .await
             .unwrap()
             .call(Request::builder().uri("/bar").body(Body::empty()).unwrap())
