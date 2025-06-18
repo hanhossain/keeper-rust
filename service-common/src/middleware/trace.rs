@@ -10,6 +10,7 @@ use opentelemetry_semantic_conventions::attribute::{
     HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
     URL_QUERY, URL_SCHEME,
 };
+use std::error::Error;
 use std::task;
 use std::task::Poll;
 use tower::{Layer, Service};
@@ -52,6 +53,7 @@ impl<S, P, B> Service<Request> for RequestTraceMiddleware<S, P>
 where
     S: Service<Request, Response = Response<B>> + Send + 'static,
     S::Future: Send + 'static,
+    S::Error: Error,
     P: TracerProvider,
     <<P as TracerProvider>::Tracer as Tracer>::Span: Send + Sync + 'static,
 {
@@ -119,8 +121,8 @@ where
                 }
                 Err(error) => {
                     let span = cx.span();
-                    // TODO: trace or log that an error occurred upstream
-                    span.set_status(Status::error(""));
+                    span.record_error(&error);
+                    span.set_status(Status::error(error.to_string()));
                     span.end();
                     Err(error)
                 }
@@ -140,7 +142,7 @@ mod tests {
     use opentelemetry::trace::{Span, get_active_span};
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
     use pretty_assertions::{assert_eq, assert_ne};
-    use tower::ServiceExt;
+    use tower::{ServiceBuilder, ServiceExt};
 
     #[tokio::test]
     async fn root_span_single_request() {
@@ -385,6 +387,42 @@ mod tests {
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
         ];
         assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn root_span_service_error() {
+        #[derive(Debug)]
+        struct TestError;
+        impl std::fmt::Display for TestError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("TestError")
+            }
+        }
+        impl Error for TestError {}
+
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+
+        let svc = ServiceBuilder::new()
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()))
+            .service_fn(|_: Request<Body>| async { Err::<_, TestError>(TestError) });
+
+        let response: Result<Response<Body>, _> = svc.oneshot(Request::new(Body::empty())).await;
+        assert!(response.is_err());
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+
+        assert_eq!(spans[0].name, "GET");
+        assert_eq!(spans[0].status, Status::error("TestError"));
+        assert_eq!(spans[0].events.events[0].name, "exception");
+        assert_eq!(
+            spans[0].events.events[0].attributes,
+            vec![KeyValue::new("exception.message", "TestError")]
+        );
     }
 
     #[tokio::test]
