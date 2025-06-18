@@ -112,6 +112,8 @@ where
                         res.status().as_u16() as i64,
                     ));
 
+                    // TODO: add error type
+                    // TODO: add exception.stacktrace
                     if res.status().is_server_error() {
                         span.set_status(Status::error(""));
                     }
@@ -121,6 +123,8 @@ where
                 }
                 Err(error) => {
                     let span = cx.span();
+                    // TODO: add error.type
+                    // TODO: add exception.stacktrace
                     span.record_error(&error);
                     span.set_status(Status::error(error.to_string()));
                     span.end();

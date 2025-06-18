@@ -130,6 +130,7 @@ where
                 .with_status(response.status())
                 .build();
 
+            // TODO: add error.type to request duration
             metrics.request_duration.record(
                 start_time.elapsed().as_secs_f64(),
                 &request_duration_attributes,
