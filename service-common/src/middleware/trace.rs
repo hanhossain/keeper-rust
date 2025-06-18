@@ -10,6 +10,7 @@ use opentelemetry_semantic_conventions::attribute::{
     HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
     URL_QUERY, URL_SCHEME,
 };
+use opentelemetry_semantic_conventions::trace::ERROR_TYPE;
 use std::error::Error;
 use std::task;
 use std::task::Poll;
@@ -112,10 +113,13 @@ where
                         res.status().as_u16() as i64,
                     ));
 
-                    // TODO: add error type
                     // TODO: add exception.stacktrace
                     if res.status().is_server_error() {
                         span.set_status(Status::error(""));
+                        span.set_attribute(KeyValue::new(
+                            ERROR_TYPE,
+                            res.status().as_str().to_string(),
+                        ));
                     }
 
                     span.end();
@@ -123,10 +127,11 @@ where
                 }
                 Err(error) => {
                     let span = cx.span();
-                    // TODO: add error.type
                     // TODO: add exception.stacktrace
                     span.record_error(&error);
-                    span.set_status(Status::error(error.to_string()));
+                    let err = error.to_string();
+                    span.set_status(Status::error(err.clone()));
+                    span.set_attribute(KeyValue::new(ERROR_TYPE, err));
                     span.end();
                     Err(error)
                 }
@@ -355,7 +360,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn root_span_server_error() {
+    async fn root_span_status_500() {
         let exporter = InMemorySpanExporter::default();
         let provider = SdkTracerProvider::builder()
             .with_simple_exporter(exporter.clone())
@@ -389,6 +394,7 @@ mod tests {
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
+            KeyValue::new(ERROR_TYPE, "500"),
         ];
         assert_eq!(span.attributes, attributes);
     }
@@ -419,6 +425,7 @@ mod tests {
         provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
         assert_eq!(spans.len(), 1);
+        dbg!(&spans);
 
         assert_eq!(spans[0].name, "GET");
         assert_eq!(spans[0].status, Status::error("TestError"));
@@ -427,6 +434,15 @@ mod tests {
             spans[0].events.events[0].attributes,
             vec![KeyValue::new("exception.message", "TestError")]
         );
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(URL_PATH, "/"),
+            KeyValue::new(ERROR_TYPE, "TestError"),
+        ];
+        assert_eq!(spans[0].attributes, attributes);
     }
 
     #[tokio::test]

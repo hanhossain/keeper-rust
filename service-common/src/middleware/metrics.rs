@@ -12,6 +12,8 @@ use opentelemetry_semantic_conventions::attribute::{
 use opentelemetry_semantic_conventions::metric::{
     HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_REQUEST_DURATION,
 };
+use opentelemetry_semantic_conventions::trace::ERROR_TYPE;
+use std::error::Error;
 use std::task::{Context, Poll};
 use std::time::Instant;
 use tower::{Layer, Service};
@@ -88,6 +90,7 @@ impl<S, B> Service<Request> for RequestMetricsMiddleware<S>
 where
     S: Service<Request, Response = Response<B>> + Send + 'static,
     S::Future: Send + 'static,
+    S::Error: Error,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -124,20 +127,21 @@ where
         let metrics = self.metrics.clone();
         let future = self.inner.call(request);
         Box::pin(async move {
-            let response = future.await?;
+            let response = future.await;
+            let request_duration_attributes = match &response {
+                Ok(res) => request_duration_attributes
+                    .with_status(res.status())
+                    .build(),
+                Err(error) => request_duration_attributes.with_error(error).build(),
+            };
 
-            let request_duration_attributes = request_duration_attributes
-                .with_status(response.status())
-                .build();
-
-            // TODO: add error.type to request duration
             metrics.request_duration.record(
                 start_time.elapsed().as_secs_f64(),
                 &request_duration_attributes,
             );
 
             metrics.active_requests.add(-1, &active_requests_attributes);
-            Ok(response)
+            response
         })
     }
 }
@@ -149,6 +153,7 @@ struct AttributeBuilder {
     version: Option<KeyValue>,
     route: Option<KeyValue>,
     status: Option<KeyValue>,
+    error_type: Option<KeyValue>,
 }
 
 impl AttributeBuilder {
@@ -187,6 +192,15 @@ impl AttributeBuilder {
             HTTP_RESPONSE_STATUS_CODE,
             status.as_u16() as i64,
         ));
+
+        if status.is_server_error() {
+            self.error_type = Some(KeyValue::new(ERROR_TYPE, status.as_str().to_string()));
+        }
+        self
+    }
+
+    fn with_error(mut self, error: &impl Error) -> Self {
+        self.error_type = Some(KeyValue::new(ERROR_TYPE, error.to_string()));
         self
     }
 
@@ -197,6 +211,7 @@ impl AttributeBuilder {
             self.version,
             self.route,
             self.status,
+            self.error_type,
         ]
         .into_iter()
         .filter_map(|x| x)
@@ -214,7 +229,7 @@ mod tests {
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
     use pretty_assertions::assert_eq;
     use std::collections::{HashMap, HashSet};
-    use tower::ServiceExt;
+    use tower::{ServiceBuilder, ServiceExt};
 
     #[tokio::test]
     async fn request_duration() {
@@ -256,6 +271,99 @@ mod tests {
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
             KeyValue::new(URL_SCHEME, "http"),
+        ]);
+        assert_eq!(attributes, expected_attributes);
+    }
+
+    #[tokio::test]
+    async fn request_duration_status_500() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter.clone())
+            .build();
+
+        let app = Router::new()
+            .route("/", get(|| async { StatusCode::INTERNAL_SERVER_ERROR }))
+            .layer(RequestMetricsLayer::new_with_provider(provider.clone()));
+
+        let _ = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        assert_eq!(resource_metrics.len(), 1);
+
+        let scope_metrics = resource_metrics[0].scope_metrics().next().unwrap();
+        assert_eq!(scope_metrics.scope().name(), PKG_NAME);
+
+        let metrics: HashMap<_, _> = scope_metrics.metrics().map(|m| (m.name(), m)).collect();
+        let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
+
+        let metric_data = match metric.data() {
+            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
+            _ => panic!("wrong metric data type"),
+        };
+        let data_point = metric_data.data_points().next().unwrap();
+        assert_eq!(data_point.count(), 1);
+
+        let attributes: HashSet<_> = data_point.attributes().cloned().collect();
+        let expected_attributes = HashSet::from([
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
+            KeyValue::new(HTTP_ROUTE, "/"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(ERROR_TYPE, "500"),
+        ]);
+        assert_eq!(attributes, expected_attributes);
+    }
+
+    #[tokio::test]
+    async fn request_duration_service_error() {
+        #[derive(Debug)]
+        struct TestError;
+        impl std::fmt::Display for TestError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("TestError")
+            }
+        }
+        impl Error for TestError {}
+
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter.clone())
+            .build();
+
+        let svc = ServiceBuilder::new()
+            .layer(RequestMetricsLayer::new_with_provider(provider.clone()))
+            .service_fn(|_: Request<Body>| async { Err::<_, TestError>(TestError) });
+
+        let response: Result<Response<Body>, _> = svc.oneshot(Request::new(Body::empty())).await;
+        assert!(response.is_err());
+
+        provider.force_flush().unwrap();
+        let resource_metrics = exporter.get_finished_metrics().unwrap();
+        assert_eq!(resource_metrics.len(), 1);
+
+        let scope_metrics = resource_metrics[0].scope_metrics().next().unwrap();
+        let metrics: HashMap<_, _> = scope_metrics.metrics().map(|m| (m.name(), m)).collect();
+        let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
+
+        let metric_data = match metric.data() {
+            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
+            _ => panic!("wrong metric data type"),
+        };
+        let data_point = metric_data.data_points().next().unwrap();
+        assert_eq!(data_point.count(), 1);
+
+        let attributes: HashSet<_> = data_point.attributes().cloned().collect();
+        let expected_attributes = HashSet::from([
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(ERROR_TYPE, "TestError"),
         ]);
         assert_eq!(attributes, expected_attributes);
     }
