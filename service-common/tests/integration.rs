@@ -30,8 +30,8 @@ async fn combine_everything() {
 
     let app = Router::new()
         .route("/", get(|| async {}))
-        .layer(RequestTraceLayer::new())
-        .layer(RequestMetricsLayer::new());
+        .layer(RequestMetricsLayer::new())
+        .layer(RequestTraceLayer::new());
 
     let _ = app
         .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
