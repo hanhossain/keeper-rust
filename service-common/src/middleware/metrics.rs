@@ -257,9 +257,8 @@ mod tests {
         let metrics: HashMap<_, _> = scope_metrics.metrics().map(|m| (m.name(), m)).collect();
         let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
 
-        let metric_data = match metric.data() {
-            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
-            _ => panic!("wrong metric data type"),
+        let AggregatedMetrics::F64(MetricData::Histogram(metric_data)) = metric.data() else {
+            panic!("wrong metric data type");
         };
         let data_point = metric_data.data_points().next().unwrap();
         assert_eq!(data_point.count(), 1);
@@ -301,9 +300,8 @@ mod tests {
         let metrics: HashMap<_, _> = scope_metrics.metrics().map(|m| (m.name(), m)).collect();
         let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
 
-        let metric_data = match metric.data() {
-            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
-            _ => panic!("wrong metric data type"),
+        let AggregatedMetrics::F64(MetricData::Histogram(metric_data)) = metric.data() else {
+            panic!("wrong metric data type");
         };
         let data_point = metric_data.data_points().next().unwrap();
         assert_eq!(data_point.count(), 1);
@@ -351,9 +349,8 @@ mod tests {
         let metrics: HashMap<_, _> = scope_metrics.metrics().map(|m| (m.name(), m)).collect();
         let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
 
-        let metric_data = match metric.data() {
-            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
-            _ => panic!("wrong metric data type"),
+        let AggregatedMetrics::F64(MetricData::Histogram(metric_data)) = metric.data() else {
+            panic!("wrong metric data type");
         };
         let data_point = metric_data.data_points().next().unwrap();
         assert_eq!(data_point.count(), 1);
@@ -402,9 +399,8 @@ mod tests {
             let metrics: HashMap<_, _> = scope_metrics.metrics().map(|m| (m.name(), m)).collect();
 
             let metric = metrics[HTTP_SERVER_ACTIVE_REQUESTS];
-            let metric_data = match metric.data() {
-                AggregatedMetrics::I64(MetricData::Sum(x)) => x,
-                _ => panic!("wrong metric data type"),
+            let AggregatedMetrics::I64(MetricData::Sum(metric_data)) = metric.data() else {
+                panic!("wrong metric data type");
             };
 
             let data_point = metric_data.data_points().next().unwrap();
@@ -489,9 +485,8 @@ mod tests {
         let metrics: HashMap<_, _> = scope_metrics[0].metrics().map(|m| (m.name(), m)).collect();
 
         let metric = metrics[HTTP_SERVER_REQUEST_DURATION];
-        let metric_data = match metric.data() {
-            AggregatedMetrics::F64(MetricData::Histogram(x)) => x,
-            _ => panic!("wrong metric data type"),
+        let AggregatedMetrics::F64(MetricData::Histogram(metric_data)) = metric.data() else {
+            panic!("wrong metric data type");
         };
         let data_point = metric_data.data_points().next().unwrap();
         assert_eq!(data_point.count(), 2);
