@@ -58,7 +58,7 @@ fn init_logs() -> SdkLoggerProvider {
 
     let otel_layer = OpenTelemetryTracingBridge::new(&provider).with_filter(
         EnvFilter::new("info")
-            .add_directive("api-service=trace".parse().unwrap())
+            .add_directive("api_service=trace".parse().unwrap())
             .add_directive("hyper=off".parse().unwrap())
             .add_directive("tonic=off".parse().unwrap())
             .add_directive("h2=off".parse().unwrap())

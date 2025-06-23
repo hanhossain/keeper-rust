@@ -130,6 +130,20 @@ dependencies = [
 [[package]]
 name = "backend-service"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "rand",
+ "serde",
+ "service-common",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "backtrace"
