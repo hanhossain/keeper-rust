@@ -143,6 +143,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AppError;
     use axum::Router;
     use axum::body::Body;
     use axum::http::StatusCode;
@@ -554,5 +555,55 @@ mod tests {
         );
         assert_eq!(child2.events.events[0].name, "from child span 2");
         assert_ne!(child2.span_context.span_id(), child1.span_context.span_id());
+    }
+
+    #[tokio::test]
+    async fn root_span_anyhow_error() {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+
+        async fn handler() -> Result<(), AppError> {
+            try_thing()?;
+            Ok(())
+        }
+
+        fn try_thing() -> Result<(), anyhow::Error> {
+            anyhow::bail!("it failed!");
+        }
+
+        let app = Router::new()
+            .route("/", get(handler))
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
+
+        let _ = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        dbg!(&spans);
+
+        assert_eq!(spans.len(), 1);
+
+        let span = &spans[0];
+        assert_eq!(span.name, "GET /");
+        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.span_kind, SpanKind::Server);
+        assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
+        assert_eq!(span.status, Status::error(""));
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(HTTP_ROUTE, "/"),
+            KeyValue::new(URL_PATH, "/"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
+            KeyValue::new(ERROR_TYPE, "500"),
+        ];
+        assert_eq!(span.attributes, attributes);
     }
 }

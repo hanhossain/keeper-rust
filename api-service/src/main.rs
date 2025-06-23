@@ -14,7 +14,6 @@ use service_common::middleware::metrics::RequestMetricsLayer;
 use service_common::middleware::trace::RequestTraceLayer;
 use std::sync::LazyLock;
 use std::time::Duration;
-use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -97,7 +96,7 @@ async fn main() {
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(service_common::shutdown_signal())
         .await
         .unwrap();
 
@@ -123,21 +122,6 @@ fn do_stuff(tracer_provider: &SdkTracerProvider) {
     });
 
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async { signal::ctrl_c().await.unwrap() };
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .unwrap()
-            .recv()
-            .await;
-    };
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {}
-    }
 }
 
 async fn ping() -> (StatusCode, Json<Ping>) {
