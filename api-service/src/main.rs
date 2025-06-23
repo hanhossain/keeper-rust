@@ -82,22 +82,7 @@ async fn main() {
     let tracer_provider = init_tracer();
     let meter_provider = init_metrics();
 
-    let tracer = tracer_provider.tracer("my-tracer");
-    tracer.in_span("Main operation", |cx| {
-        let span = cx.span();
-        span.add_event("Nice operation!".to_string(), vec![KeyValue::new("bogons", 100)]);
-        span.set_attribute(KeyValue::new("another.key", "yes"));
-
-        tracing::info!(name: "my-event-inside-span", target: "my-target", "hello from {}. My price is {}. I am also inside a Span!", "banana", 2.99);
-
-        tracer.in_span("Sub operation...", |cx| {
-            let span = cx.span();
-            span.set_attribute(KeyValue::new("another.key", "yes"));
-            span.add_event("Sub span event", vec![]);
-        });
-    });
-
-    tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
+    do_stuff(&tracer_provider);
 
     let middleware = ServiceBuilder::new()
         .layer(RequestTraceLayer::new())
@@ -119,6 +104,25 @@ async fn main() {
     let _ = tracer_provider.shutdown();
     let _ = meter_provider.shutdown();
     let _ = logger_provider.shutdown();
+}
+
+fn do_stuff(tracer_provider: &SdkTracerProvider) {
+    let tracer = tracer_provider.tracer("my-tracer");
+    tracer.in_span("Main operation", |cx| {
+        let span = cx.span();
+        span.add_event("Nice operation!".to_string(), vec![KeyValue::new("bogons", 100)]);
+        span.set_attribute(KeyValue::new("another.key", "yes"));
+
+        tracing::info!(name: "my-event-inside-span", target: "my-target", "hello from {}. My price is {}. I am also inside a Span!", "banana", 2.99);
+
+        tracer.in_span("Sub operation...", |cx| {
+            let span = cx.span();
+            span.set_attribute(KeyValue::new("another.key", "yes"));
+            span.add_event("Sub span event", vec![]);
+        });
+    });
+
+    tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 }
 
 async fn shutdown_signal() {
