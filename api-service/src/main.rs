@@ -9,7 +9,8 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use service_common::error::AppError;
 use service_common::middleware::metrics::RequestMetricsLayer;
 use service_common::middleware::trace::RequestTraceLayer;
 use std::sync::LazyLock;
@@ -124,16 +125,27 @@ fn do_stuff(tracer_provider: &SdkTracerProvider) {
     tracing::info!(name: "my-event", target: "my-target", "hello from {}. My price is {}", "apple", 1.99);
 }
 
-async fn ping() -> (StatusCode, Json<Ping>) {
-    (
+async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
+    let res = reqwest::get("http://localhost:3001/random")
+        .await?
+        .json::<BackendResponse>()
+        .await?;
+    Ok((
         StatusCode::OK,
         Json(Ping {
             ping: "Pong".to_string(),
+            delay_seconds: res.seconds,
         }),
-    )
+    ))
 }
 
 #[derive(Serialize)]
 struct Ping {
     ping: String,
+    delay_seconds: f64,
+}
+
+#[derive(Deserialize)]
+struct BackendResponse {
+    seconds: f64,
 }
