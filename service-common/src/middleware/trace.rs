@@ -172,8 +172,9 @@ mod tests {
     use axum::body::Body;
     use axum::http::StatusCode;
     use axum::routing::get;
-    use opentelemetry::SpanId;
     use opentelemetry::trace::{Span, get_active_span};
+    use opentelemetry::{SpanId, TraceId};
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
     use opentelemetry_semantic_conventions::trace::{EXCEPTION_MESSAGE, EXCEPTION_STACKTRACE};
     use pretty_assertions::{assert_eq, assert_ne};
@@ -631,6 +632,57 @@ mod tests {
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
             KeyValue::new(ERROR_TYPE, "500"),
+        ];
+        assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn child_span_remote_request() {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+
+        let app = Router::new()
+            .route("/", get(|| async {}))
+            .layer(RequestTraceLayer::new_with_provider(provider.clone()));
+
+        let _ = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(
+                        "traceparent",
+                        "00-00000000000000000000000000000001-0000000000000002-01",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+
+        assert_eq!(spans.len(), 1);
+
+        let span = &spans[0];
+        assert_eq!(span.name, "GET /");
+        assert_eq!(span.span_context.trace_id(), TraceId::from_u128(1));
+        assert_eq!(span.parent_span_id, SpanId::from_u64(2));
+        assert_eq!(span.span_kind, SpanKind::Server);
+        assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
+        assert_eq!(span.status, Status::Unset);
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(URL_SCHEME, "http"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(HTTP_ROUTE, "/"),
+            KeyValue::new(URL_PATH, "/"),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
         ];
         assert_eq!(span.attributes, attributes);
     }
