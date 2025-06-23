@@ -1,11 +1,13 @@
 use crate::PKG_NAME;
 use axum::extract::{MatchedPath, Request};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use futures_util::future::BoxFuture;
 use opentelemetry::context::FutureExt;
 use opentelemetry::global::GlobalTracerProvider;
+use opentelemetry::propagation::Extractor;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
-use opentelemetry::{Context, KeyValue, global};
+use opentelemetry::{KeyValue, global};
 use opentelemetry_semantic_conventions::attribute::{
     HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, NETWORK_PROTOCOL_VERSION, URL_PATH,
     URL_QUERY, URL_SCHEME,
@@ -67,6 +69,9 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
+        let parent_context = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&RequestHeaderCarrier::new(request.headers()))
+        });
         let method = request.method();
         let route = request
             .extensions()
@@ -99,9 +104,9 @@ where
             .span_builder(span_name)
             .with_kind(SpanKind::Server)
             .with_attributes(attributes)
-            .start(&tracer);
+            .start_with_context(&tracer, &parent_context);
 
-        let cx = Context::current_with_span(span);
+        let cx = parent_context.with_span(span);
         let future = self.inner.call(request).with_context(cx.clone());
         Box::pin(async move {
             let response = future.await;
@@ -136,6 +141,26 @@ where
                 }
             }
         })
+    }
+}
+
+struct RequestHeaderCarrier<'a> {
+    headers: &'a HeaderMap,
+}
+
+impl<'a> RequestHeaderCarrier<'a> {
+    fn new(headers: &'a HeaderMap) -> Self {
+        RequestHeaderCarrier { headers }
+    }
+}
+
+impl Extractor for RequestHeaderCarrier<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.headers.get(key).and_then(|v| v.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.headers.keys().map(|header| header.as_str()).collect()
     }
 }
 

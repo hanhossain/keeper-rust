@@ -9,6 +9,7 @@ use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use serde::Serialize;
 use service_common::middleware::metrics::RequestMetricsLayer;
@@ -80,6 +81,8 @@ fn init_logs() -> SdkLoggerProvider {
 
 #[tokio::main]
 async fn main() {
+    global::set_text_map_propagator(TraceContextPropagator::new());
+
     let logger_provider = init_logs();
     let tracer_provider = init_tracer();
     let meter_provider = init_metrics();
