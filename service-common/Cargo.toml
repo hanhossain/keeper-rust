@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.98"
+anyhow = { version = "1.0.98", features = ["backtrace"] }
 axum = "0.8.4"
 futures-util = "0.3.31"
 opentelemetry = "0.30.0"

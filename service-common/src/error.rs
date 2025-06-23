@@ -1,10 +1,25 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::{Context, KeyValue};
+use opentelemetry_semantic_conventions::trace::{EXCEPTION_MESSAGE, EXCEPTION_STACKTRACE};
+use std::backtrace::BacktraceStatus;
 
 pub struct AppError(anyhow::Error);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        Context::map_current(|cx| {
+            let span = cx.span();
+            let mut attributes = vec![KeyValue::new(EXCEPTION_MESSAGE, self.0.to_string())];
+
+            let backtrace = self.0.backtrace();
+            if backtrace.status() == BacktraceStatus::Captured {
+                attributes.push(KeyValue::new(EXCEPTION_STACKTRACE, backtrace.to_string()));
+            }
+
+            span.add_event("exception", attributes);
+        });
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Something went wrong: {}", self.0),

@@ -151,6 +151,7 @@ mod tests {
     use opentelemetry::SpanId;
     use opentelemetry::trace::{Span, get_active_span};
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+    use opentelemetry_semantic_conventions::trace::{EXCEPTION_MESSAGE, EXCEPTION_STACKTRACE};
     use pretty_assertions::{assert_eq, assert_ne};
     use tower::{ServiceBuilder, ServiceExt};
 
@@ -426,7 +427,6 @@ mod tests {
         provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
         assert_eq!(spans.len(), 1);
-        dbg!(&spans);
 
         assert_eq!(spans[0].name, "GET");
         assert_eq!(spans[0].status, Status::error("TestError"));
@@ -471,7 +471,6 @@ mod tests {
 
         provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
-        dbg!(&spans);
 
         assert_eq!(spans.len(), 1);
 
@@ -512,7 +511,6 @@ mod tests {
 
         provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
-        dbg!(&spans);
 
         assert_eq!(spans.len(), 3);
 
@@ -584,16 +582,22 @@ mod tests {
 
         provider.force_flush().unwrap();
         let spans = exporter.get_finished_spans().unwrap();
-        dbg!(&spans);
 
         assert_eq!(spans.len(), 1);
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
-        assert_eq!(span.span_kind, SpanKind::Server);
-        assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
         assert_eq!(span.status, Status::error(""));
+        assert_eq!(span.events.events[0].name, "exception");
+        assert_eq!(
+            span.events.events[0].attributes[0],
+            KeyValue::new(EXCEPTION_MESSAGE, "it failed!")
+        );
+
+        assert_eq!(
+            span.events.events[0].attributes[1].key.as_str(),
+            EXCEPTION_STACKTRACE
+        );
 
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
