@@ -10,10 +10,10 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         Context::map_current(|cx| {
             let span = cx.span();
-            let mut attributes = vec![KeyValue::new(EXCEPTION_MESSAGE, self.0.to_string())];
-
-            let backtrace = self.0.backtrace();
-            attributes.push(KeyValue::new(EXCEPTION_STACKTRACE, backtrace.to_string()));
+            let attributes = vec![
+                KeyValue::new(EXCEPTION_MESSAGE, self.0.to_string()),
+                KeyValue::new(EXCEPTION_STACKTRACE, self.0.backtrace().to_string()),
+            ];
 
             span.add_event("exception", attributes);
         });

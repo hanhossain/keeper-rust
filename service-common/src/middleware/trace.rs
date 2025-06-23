@@ -113,7 +113,6 @@ where
                         res.status().as_u16() as i64,
                     ));
 
-                    // TODO: add exception.stacktrace
                     if res.status().is_server_error() {
                         span.set_status(Status::error(""));
                         span.set_attribute(KeyValue::new(
