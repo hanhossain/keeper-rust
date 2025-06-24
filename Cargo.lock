@@ -1444,6 +1444,7 @@ dependencies = [
  "axum",
  "futures-util",
  "opentelemetry",
+ "opentelemetry-http",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "pretty_assertions",

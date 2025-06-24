@@ -8,6 +8,7 @@ anyhow = { version = "1.0.98", features = ["backtrace"] }
 axum = "0.8.4"
 futures-util = "0.3.31"
 opentelemetry = "0.30.0"
+opentelemetry-http = "0.30.0"
 opentelemetry-semantic-conventions = { version = "0.30.0", features = ["semconv_experimental"] }
 tokio = "1.45.1"
 tower = "0.5.2"
