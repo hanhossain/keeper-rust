@@ -5,6 +5,7 @@ use opentelemetry::context::FutureExt;
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_http::HeaderInjector;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
@@ -149,9 +150,12 @@ async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
 
 async fn get_backend_response() -> anyhow::Result<BackendResponse> {
     let client = reqwest::Client::new();
+    let mut request = client.get("http://localhost:3001/random").build()?;
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject(&mut HeaderInjector(request.headers_mut()))
+    });
     let res = client
-        .get("http://localhost:3001/random")
-        .send()
+        .execute(request)
         .await?
         .json::<BackendResponse>()
         .await?;
