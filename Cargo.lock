@@ -39,6 +39,7 @@ dependencies = [
 name = "api-service"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
  "opentelemetry",
  "opentelemetry-appender-tracing",

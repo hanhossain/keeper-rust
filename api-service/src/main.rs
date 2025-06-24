@@ -1,8 +1,9 @@
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
-use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::context::FutureExt;
+use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
@@ -129,10 +130,14 @@ fn do_stuff(tracer_provider: &SdkTracerProvider) {
 }
 
 async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
-    let res = reqwest::get("http://localhost:3001/random")
-        .await?
-        .json::<BackendResponse>()
-        .await?;
+    let tracer = global::tracer("api-service");
+    let span = tracer
+        .span_builder("ping")
+        .with_kind(SpanKind::Client)
+        .start(&tracer);
+    let cx = Context::current_with_span(span);
+
+    let res = get_backend_response().with_context(cx).await?;
     Ok((
         StatusCode::OK,
         Json(Ping {
@@ -140,6 +145,17 @@ async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
             delay_seconds: res.seconds,
         }),
     ))
+}
+
+async fn get_backend_response() -> anyhow::Result<BackendResponse> {
+    let client = reqwest::Client::new();
+    let res = client
+        .get("http://localhost:3001/random")
+        .send()
+        .await?
+        .json::<BackendResponse>()
+        .await?;
+    Ok(res)
 }
 
 #[derive(Serialize)]
