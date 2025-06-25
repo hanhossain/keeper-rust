@@ -138,6 +138,7 @@ dependencies = [
 name = "backend-service"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
  "opentelemetry",
  "opentelemetry-appender-tracing",
@@ -1488,6 +1489,7 @@ dependencies = [
  "reqwest-tracing",
  "tokio",
  "tower",
+ "tracing",
 ]
 
 [[package]]

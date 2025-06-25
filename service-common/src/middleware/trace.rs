@@ -106,18 +106,24 @@ where
             .start_with_context(&tracer, &parent_context);
 
         let cx = parent_context.with_span(span);
-        let future = self.inner.call(request).with_context(cx.clone());
+        let _guard = cx.clone().attach();
+        tracing::debug!("request starting");
+
+        let future = self.inner.call(request).with_current_context();
         Box::pin(async move {
             let response = future.await;
-            match response {
+            let _guard = cx.clone().attach();
+            let span = cx.span();
+
+            let result = match response {
                 Ok(res) => {
-                    let span = cx.span();
                     span.set_attribute(KeyValue::new(
                         HTTP_RESPONSE_STATUS_CODE,
                         res.status().as_u16() as i64,
                     ));
 
                     if res.status().is_server_error() {
+                        tracing::error!("request failed with handled error");
                         span.set_status(Status::error(""));
                         span.set_attribute(KeyValue::new(
                             ERROR_TYPE,
@@ -125,20 +131,22 @@ where
                         ));
                     }
 
-                    span.end();
                     Ok(res)
                 }
                 Err(error) => {
-                    let span = cx.span();
                     // TODO: add exception.stacktrace
+                    tracing::error!("request failed with unhandled error");
                     span.record_error(&error);
                     let err = error.to_string();
                     span.set_status(Status::error(err.clone()));
                     span.set_attribute(KeyValue::new(ERROR_TYPE, err));
-                    span.end();
                     Err(error)
                 }
-            }
+            };
+
+            tracing::debug!("request ending");
+            span.end();
+            result
         })
     }
 }

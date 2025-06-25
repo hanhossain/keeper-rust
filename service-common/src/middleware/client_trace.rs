@@ -8,6 +8,7 @@ use reqwest_middleware::reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
 use reqwest_tracing::default_span_name;
 
+// TODO: add tests
 pub struct ReqwestTracingMiddleware;
 
 #[async_trait::async_trait]
