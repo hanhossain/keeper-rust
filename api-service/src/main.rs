@@ -1,3 +1,4 @@
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -9,7 +10,7 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use reqwest_middleware::ClientBuilder;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::OtelPathNames;
 use serde::{Deserialize, Serialize};
 use service_common::error::AppError;
@@ -82,6 +83,21 @@ fn init_logs() -> anyhow::Result<SdkLoggerProvider> {
     Ok(provider)
 }
 
+#[derive(Clone)]
+struct AppState {
+    backend_client: ClientWithMiddleware,
+}
+
+impl AppState {
+    fn new() -> anyhow::Result<AppState> {
+        let client = reqwest::Client::builder().build()?;
+        let backend_client = ClientBuilder::new(client)
+            .with(ReqwestTracingMiddleware)
+            .build();
+        Ok(AppState { backend_client })
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     global::set_text_map_propagator(TraceContextPropagator::new());
@@ -94,7 +110,12 @@ async fn main() -> anyhow::Result<()> {
         .layer(RequestTraceLayer::new())
         .layer(RequestMetricsLayer::new())
         .layer(TimeoutLayer::new(Duration::from_secs(10)));
-    let app = Router::new().route("/ping", get(ping)).layer(middleware);
+
+    let app_state = AppState::new()?;
+    let app = Router::new()
+        .route("/ping", get(ping))
+        .layer(middleware)
+        .with_state(app_state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
 
     tracing::debug!("listening on {}", listener.local_addr()?);
@@ -110,8 +131,15 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
-    let res = get_backend_response().await?;
+async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>), AppError> {
+    let res = state
+        .backend_client
+        .get("http://localhost:3001/random")
+        .with_extension(OtelPathNames::known_paths(["/random"])?)
+        .send()
+        .await?
+        .json::<BackendResponse>()
+        .await?;
     Ok((
         StatusCode::OK,
         Json(Ping {
@@ -119,21 +147,6 @@ async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
             delay_seconds: res.seconds,
         }),
     ))
-}
-
-async fn get_backend_response() -> anyhow::Result<BackendResponse> {
-    let client = reqwest::Client::new();
-    let client = ClientBuilder::new(client)
-        .with(ReqwestTracingMiddleware)
-        .build();
-    let res = client
-        .get("http://localhost:3001/random")
-        .with_extension(OtelPathNames::known_paths(["/random"])?)
-        .send()
-        .await?
-        .json::<BackendResponse>()
-        .await?;
-    Ok(res)
 }
 
 #[derive(Serialize)]
