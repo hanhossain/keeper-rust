@@ -5,15 +5,17 @@ use opentelemetry::context::FutureExt;
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_http::HeaderInjector;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use reqwest_middleware::ClientBuilder;
+use reqwest_tracing::OtelPathNames;
 use serde::{Deserialize, Serialize};
 use service_common::error::AppError;
+use service_common::middleware::client_trace::ReqwestTracingMiddleware;
 use service_common::middleware::metrics::RequestMetricsLayer;
 use service_common::middleware::trace::RequestTraceLayer;
 use std::sync::LazyLock;
@@ -131,14 +133,7 @@ fn do_stuff(tracer_provider: &SdkTracerProvider) {
 }
 
 async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
-    let tracer = global::tracer("api-service");
-    let span = tracer
-        .span_builder("ping")
-        .with_kind(SpanKind::Client)
-        .start(&tracer);
-    let cx = Context::current_with_span(span);
-
-    let res = get_backend_response().with_context(cx).await?;
+    let res = get_backend_response().await?;
     Ok((
         StatusCode::OK,
         Json(Ping {
@@ -150,12 +145,13 @@ async fn ping() -> Result<(StatusCode, Json<Ping>), AppError> {
 
 async fn get_backend_response() -> anyhow::Result<BackendResponse> {
     let client = reqwest::Client::new();
-    let mut request = client.get("http://localhost:3001/random").build()?;
-    global::get_text_map_propagator(|propagator| {
-        propagator.inject(&mut HeaderInjector(request.headers_mut()))
-    });
+    let client = ClientBuilder::new(client)
+        .with(ReqwestTracingMiddleware)
+        .build();
     let res = client
-        .execute(request)
+        .get("http://localhost:3001/random")
+        .with_extension(OtelPathNames::known_paths(["/random"])?)
+        .send()
         .await?
         .json::<BackendResponse>()
         .await?;
