@@ -7,6 +7,8 @@ use opentelemetry_http::HeaderInjector;
 use opentelemetry_semantic_conventions::trace::{
     ERROR_TYPE, HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, SERVER_ADDRESS, SERVER_PORT,
     URL_FULL,
+    ERROR_TYPE, EXCEPTION_MESSAGE, HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, SERVER_ADDRESS,
+    SERVER_PORT, URL_FULL,
 };
 use reqwest_middleware::reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
@@ -70,10 +72,14 @@ impl Middleware for ReqwestTracingMiddleware {
                 }
             }
             Err(error) => {
-                span.record_error(&error);
-                let err = error.to_string();
-                span.set_status(Status::error(err.clone()));
-                span.set_attribute(KeyValue::new(ERROR_TYPE, err));
+                let exception = format!("{:?}", error);
+                span.set_status(Status::error(exception.clone()));
+                span.set_attribute(KeyValue::new(ERROR_TYPE, error.to_string()));
+
+                span.add_event(
+                    "exception",
+                    vec![KeyValue::new(EXCEPTION_MESSAGE, exception)],
+                );
                 tracing::error!(error = ?error, "client received error");
             }
         };
