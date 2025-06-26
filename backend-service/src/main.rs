@@ -3,7 +3,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use opentelemetry::context::FutureExt;
 use opentelemetry::trace::{TraceContextExt, Tracer};
-use opentelemetry::{Context, global};
+use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
@@ -94,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/random", get(random_handler))
+        .route("/randomfail", get(randomfail_handler))
         .layer(middleware);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3001").await?;
 
@@ -133,4 +134,17 @@ async fn random_handler() -> (StatusCode, Json<RandResponse>) {
     let rand_val = fut.with_context(cx).await;
 
     (StatusCode::OK, Json(RandResponse { seconds: rand_val }))
+}
+
+async fn randomfail_handler() -> StatusCode {
+    let value = rand::random_bool(0.5);
+    Context::map_current(|cx| {
+        cx.span()
+            .set_attribute(KeyValue::new("random.value", value));
+    });
+    if value {
+        StatusCode::OK
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
 }

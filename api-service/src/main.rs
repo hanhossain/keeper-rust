@@ -140,6 +140,14 @@ async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>),
         .await?
         .json::<BackendResponse>()
         .await?;
+
+    state
+        .backend_client
+        .get("http://localhost:3001/randomfail")
+        .with_extension(OtelPathNames::known_paths(["/randomfail"])?)
+        .send()
+        .await?
+        .error_for_status()?;
     Ok((
         StatusCode::OK,
         Json(Ping {
