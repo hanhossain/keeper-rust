@@ -24,12 +24,22 @@ pub async fn shutdown_signal() {
     }
 }
 
-pub trait SpanExt {
-    fn record_error_ext(&self, err: &dyn Error);
+pub trait SpanExt<T> {
+    fn record_error_ext(&self, err: T);
 }
 
-impl SpanExt for SpanRef<'_> {
+impl SpanExt<&dyn Error> for SpanRef<'_> {
     fn record_error_ext(&self, err: &dyn Error) {
+        let attributes = vec![
+            KeyValue::new(EXCEPTION_MESSAGE, err.to_string()),
+            KeyValue::new(EXCEPTION_STACKTRACE, format!("{:#?}", err)),
+        ];
+        self.add_event("exception", attributes);
+    }
+}
+
+impl SpanExt<&anyhow::Error> for SpanRef<'_> {
+    fn record_error_ext(&self, err: &anyhow::Error) {
         let attributes = vec![
             KeyValue::new(EXCEPTION_MESSAGE, err.to_string()),
             KeyValue::new(EXCEPTION_STACKTRACE, format!("{:?}", err)),

@@ -11,6 +11,7 @@ use opentelemetry_semantic_conventions::trace::{
 use reqwest_middleware::reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
 use reqwest_tracing::default_span_name;
+use std::error::Error;
 
 // TODO: add tests
 pub struct ReqwestTracingMiddleware;
@@ -72,7 +73,7 @@ impl Middleware for ReqwestTracingMiddleware {
             Err(error) => {
                 span.set_status(Status::error(""));
                 span.set_attribute(KeyValue::new(ERROR_TYPE, error.to_string()));
-                span.record_error_ext(error);
+                span.record_error_ext(error as &dyn Error);
                 tracing::error!(error = ?error, "client received error");
             }
         };
