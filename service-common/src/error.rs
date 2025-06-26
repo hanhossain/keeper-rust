@@ -12,7 +12,7 @@ impl IntoResponse for AppError {
             let span = cx.span();
             let attributes = vec![
                 KeyValue::new(EXCEPTION_MESSAGE, self.0.to_string()),
-                KeyValue::new(EXCEPTION_STACKTRACE, self.0.backtrace().to_string()),
+                KeyValue::new(EXCEPTION_STACKTRACE, format!("{:?}", self.0)),
             ];
 
             span.add_event("exception", attributes);
