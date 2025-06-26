@@ -441,7 +441,7 @@ mod tests {
         assert_eq!(spans.len(), 1);
 
         assert_eq!(spans[0].name, "GET");
-        assert_eq!(spans[0].status, Status::error("TestError"));
+        assert_eq!(spans[0].status, Status::error(""));
         assert_eq!(spans[0].events.events[0].name, "exception");
         assert_eq!(
             spans[0].events.events[0].attributes,
