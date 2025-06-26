@@ -1,4 +1,4 @@
-use crate::PKG_NAME;
+use crate::{PKG_NAME, SpanExt};
 use axum::extract::{MatchedPath, Request};
 use axum::response::Response;
 use futures_util::future::BoxFuture;
@@ -137,9 +137,9 @@ where
                     // TODO: add exception.stacktrace
                     tracing::error!("request failed with unhandled error");
                     span.record_error(&error);
-                    let err = error.to_string();
-                    span.set_status(Status::error(err.clone()));
-                    span.set_attribute(KeyValue::new(ERROR_TYPE, err));
+                    span.set_status(Status::error(""));
+                    span.set_attribute(KeyValue::new(ERROR_TYPE, error.to_string()));
+                    span.record_error_ext(&error as &dyn Error);
                     Err(error)
                 }
             };
