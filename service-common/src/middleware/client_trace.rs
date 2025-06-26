@@ -24,10 +24,6 @@ impl Middleware for ReqwestTracingMiddleware {
         extensions: &mut Extensions,
         next: Next<'_>,
     ) -> reqwest_middleware::Result<Response> {
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject(&mut HeaderInjector(req.headers_mut()))
-        });
-
         let tracer = global::tracer(PKG_NAME);
         let span_name = default_span_name(&req, extensions).to_string();
 
@@ -51,6 +47,11 @@ impl Middleware for ReqwestTracingMiddleware {
             .with_attributes(attributes)
             .start(&tracer);
         let cx = Context::current_with_span(span);
+
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&cx, &mut HeaderInjector(req.headers_mut()))
+        });
+
         let res = next.run(req, extensions).with_context(cx.clone()).await;
 
         let _guard = cx.clone().attach();
