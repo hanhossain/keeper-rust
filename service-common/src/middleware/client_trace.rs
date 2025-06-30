@@ -93,7 +93,6 @@ where
                 }
             }
             Err(error) => {
-                // TODO: test
                 span.set_status(Status::error(""));
                 span.set_attribute(KeyValue::new(ERROR_TYPE, error.to_string()));
                 span.record_error_ext(error as &dyn Error);
@@ -362,6 +361,86 @@ mod tests {
             KeyValue::new(SERVER_PORT, server.socket_address().port() as i64),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
             KeyValue::new(ERROR_TYPE, "500"),
+        ];
+        assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn request_failed_middleware_failure() {
+        #[derive(Debug)]
+        struct FailingMiddlewareError;
+
+        impl std::fmt::Display for FailingMiddlewareError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("FailingMiddlewareErrorDisplay")
+            }
+        }
+
+        impl Error for FailingMiddlewareError {}
+
+        struct FailingMiddleware;
+
+        #[async_trait::async_trait]
+        impl Middleware for FailingMiddleware {
+            async fn handle(
+                &self,
+                _req: Request,
+                _extensions: &mut Extensions,
+                _next: Next<'_>,
+            ) -> reqwest_middleware::Result<Response> {
+                Err(reqwest_middleware::Error::middleware(
+                    FailingMiddlewareError,
+                ))
+            }
+        }
+
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        global::set_text_map_propagator(TraceContextPropagator::new());
+
+        let server = mockito::Server::new_async().await;
+
+        let client = ClientBuilder::new(Client::new())
+            .with(ReqwestTracingMiddleware::new_with_provider(
+                provider.clone(),
+            ))
+            .with(FailingMiddleware)
+            .build();
+
+        let root_span = provider.tracer("tracer").start("test root");
+        let cx = Context::current_with_span(root_span);
+
+        let response = client
+            .get(format!("{}/hello", server.url()))
+            .with_extension(OtelPathNames::known_paths(["/hello"]).unwrap())
+            .send()
+            .with_context(cx.clone())
+            .await
+            .unwrap_err();
+        assert!(response.is_middleware());
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        let span = &spans[0];
+
+        assert_eq!(
+            span.span_context.trace_id(),
+            cx.span().span_context().trace_id()
+        );
+        assert_eq!(span.parent_span_id, cx.span().span_context().span_id());
+        assert_eq!(span.span_kind, SpanKind::Client);
+        assert_eq!(span.name, "GET /hello");
+        assert_eq!(span.status, Status::error(""));
+        assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(SERVER_ADDRESS, server.socket_address().ip().to_string()),
+            KeyValue::new(URL_FULL, format!("{}/hello", server.url())),
+            KeyValue::new(SERVER_PORT, server.socket_address().port() as i64),
+            KeyValue::new(ERROR_TYPE, "FailingMiddlewareErrorDisplay"),
         ];
         assert_eq!(span.attributes, attributes);
     }
