@@ -14,13 +14,11 @@ use reqwest_middleware::{Middleware, Next};
 use reqwest_tracing::default_span_name;
 use std::error::Error;
 
-// TODO: add tests
 pub struct ReqwestTracingMiddleware<P> {
     tracer_provider: P,
 }
 
 impl ReqwestTracingMiddleware<GlobalTracerProvider> {
-    // TODO: add to integration test
     pub fn new() -> Self {
         Self::new_with_provider(global::tracer_provider())
     }
