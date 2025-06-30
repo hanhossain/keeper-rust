@@ -1,6 +1,7 @@
 use crate::{PKG_NAME, SpanExt};
 use axum::http::Extensions;
 use opentelemetry::context::FutureExt;
+use opentelemetry::global::GlobalTracerProvider;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_http::HeaderInjector;
@@ -16,6 +17,13 @@ use std::error::Error;
 // TODO: add tests
 pub struct ReqwestTracingMiddleware<P> {
     tracer_provider: P,
+}
+
+impl ReqwestTracingMiddleware<GlobalTracerProvider> {
+    // TODO: add to integration test
+    pub fn new() -> Self {
+        Self::new_with_provider(global::tracer_provider())
+    }
 }
 
 impl<P> ReqwestTracingMiddleware<P> {

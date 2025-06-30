@@ -92,7 +92,7 @@ impl AppState {
     fn new() -> anyhow::Result<AppState> {
         let client = reqwest::Client::builder().build()?;
         let backend_client = ClientBuilder::new(client)
-            .with(ReqwestTracingMiddleware)
+            .with(ReqwestTracingMiddleware::new())
             .build();
         Ok(AppState { backend_client })
     }
