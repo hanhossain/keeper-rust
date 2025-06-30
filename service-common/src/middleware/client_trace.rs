@@ -46,7 +46,6 @@ where
         next: Next<'_>,
     ) -> reqwest_middleware::Result<Response> {
         let tracer = self.tracer_provider.tracer(PKG_NAME);
-        // TODO: test with known path
         let span_name = default_span_name(&req, extensions).to_string();
 
         let method = req.method().to_string();
@@ -93,7 +92,6 @@ where
                     span.set_attribute(KeyValue::new(ERROR_TYPE, status.as_str().to_string()));
                     tracing::error!(status_code = ?status, "client received error status");
                 }
-                // TODO: else {} test
             }
             Err(error) => {
                 // TODO: test
@@ -116,6 +114,7 @@ mod tests {
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
     use reqwest_middleware::ClientBuilder;
     use reqwest_middleware::reqwest::Client;
+    use reqwest_tracing::OtelPathNames;
 
     #[tokio::test]
     async fn request_succeeded_no_known_path() {
@@ -142,9 +141,8 @@ mod tests {
         let root_span = provider.tracer("tracer").start("test root");
         let cx = Context::current_with_span(root_span);
 
-        let url = format!("{}/hello", server.url());
         let response = client
-            .get(url)
+            .get(format!("{}/hello", server.url()))
             .send()
             .with_context(cx.clone())
             .await
@@ -166,6 +164,68 @@ mod tests {
         assert_eq!(span.parent_span_id, cx.span().span_context().span_id());
         assert_eq!(span.span_kind, SpanKind::Client);
         assert_eq!(span.name, "GET");
+        assert_eq!(span.status, Status::Unset);
+        assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
+
+        let attributes = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(SERVER_ADDRESS, server.socket_address().ip().to_string()),
+            KeyValue::new(URL_FULL, format!("{}/hello", server.url())),
+            KeyValue::new(SERVER_PORT, server.socket_address().port() as i64),
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
+        ];
+        assert_eq!(span.attributes, attributes);
+    }
+
+    #[tokio::test]
+    async fn request_succeeded_with_known_path() {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        global::set_text_map_propagator(TraceContextPropagator::new());
+
+        let mut server = mockito::Server::new_async().await;
+        let server_mock = server
+            .mock("GET", "/hello")
+            .match_header("traceparent", mockito::Matcher::Any)
+            .with_body("world")
+            .create_async()
+            .await;
+
+        let client = ClientBuilder::new(Client::new())
+            .with(ReqwestTracingMiddleware::new_with_provider(
+                provider.clone(),
+            ))
+            .build();
+
+        let root_span = provider.tracer("tracer").start("test root");
+        let cx = Context::current_with_span(root_span);
+
+        let response = client
+            .get(format!("{}/hello", server.url()))
+            .with_extension(OtelPathNames::known_paths(["/hello"]).unwrap())
+            .send()
+            .with_context(cx.clone())
+            .await
+            .unwrap();
+
+        let text = response.text().await.unwrap();
+        assert_eq!(text, "world");
+
+        server_mock.assert_async().await;
+
+        provider.force_flush().unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        let span = &spans[0];
+
+        assert_eq!(
+            span.span_context.trace_id(),
+            cx.span().span_context().trace_id()
+        );
+        assert_eq!(span.parent_span_id, cx.span().span_context().span_id());
+        assert_eq!(span.span_kind, SpanKind::Client);
+        assert_eq!(span.name, "GET /hello");
         assert_eq!(span.status, Status::Unset);
         assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
 
