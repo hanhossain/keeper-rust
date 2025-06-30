@@ -14,6 +14,7 @@ use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::OtelPathNames;
 use serde::{Deserialize, Serialize};
 use service_common::error::AppError;
+use service_common::middleware::client_metrics::ReqwestMetricsMiddleware;
 use service_common::middleware::client_trace::ReqwestTracingMiddleware;
 use service_common::middleware::metrics::RequestMetricsLayer;
 use service_common::middleware::trace::RequestTraceLayer;
@@ -89,12 +90,12 @@ struct AppState {
 }
 
 impl AppState {
-    fn new() -> anyhow::Result<AppState> {
-        let client = reqwest::Client::builder().build()?;
-        let backend_client = ClientBuilder::new(client)
+    fn new() -> AppState {
+        let backend_client = ClientBuilder::new(reqwest::Client::new())
             .with(ReqwestTracingMiddleware::new())
+            .with(ReqwestMetricsMiddleware::new())
             .build();
-        Ok(AppState { backend_client })
+        AppState { backend_client }
     }
 }
 
@@ -111,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(RequestMetricsLayer::new())
         .layer(TimeoutLayer::new(Duration::from_secs(10)));
 
-    let app_state = AppState::new()?;
+    let app_state = AppState::new();
     let app = Router::new()
         .route("/ping", get(ping))
         .layer(middleware)
