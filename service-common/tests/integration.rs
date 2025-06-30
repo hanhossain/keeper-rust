@@ -7,12 +7,13 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
 use opentelemetry_semantic_conventions::metric::{
-    HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_REQUEST_DURATION,
+    HTTP_CLIENT_REQUEST_DURATION, HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_REQUEST_DURATION,
 };
 use pretty_assertions::assert_eq;
 use reqwest_middleware::ClientBuilder;
 use reqwest_middleware::reqwest::Client;
 use reqwest_tracing::OtelPathNames;
+use service_common::middleware::client_metrics::ReqwestMetricsMiddleware;
 use service_common::middleware::client_trace::ReqwestTracingMiddleware;
 use service_common::middleware::metrics::RequestMetricsLayer;
 use service_common::middleware::trace::RequestTraceLayer;
@@ -70,6 +71,7 @@ async fn spawn_server() -> SocketAddr {
 async fn run_client(addr: &SocketAddr) {
     let client = ClientBuilder::new(Client::new())
         .with(ReqwestTracingMiddleware::new())
+        .with(ReqwestMetricsMiddleware::new())
         .build();
 
     let root_span = global::tracer("client-tracer").start("client-root");
@@ -98,7 +100,6 @@ async fn combine_everything() {
     meter_provider.force_flush().unwrap();
 
     let spans = span_exporter.get_finished_spans().unwrap();
-    dbg!(&spans);
     assert_eq!(spans.len(), 4);
 
     let client_root = spans
@@ -141,6 +142,10 @@ async fn combine_everything() {
         .collect();
     assert_eq!(
         metric_names,
-        HashSet::from([HTTP_SERVER_REQUEST_DURATION, HTTP_SERVER_ACTIVE_REQUESTS])
+        HashSet::from([
+            HTTP_SERVER_REQUEST_DURATION,
+            HTTP_SERVER_ACTIVE_REQUESTS,
+            HTTP_CLIENT_REQUEST_DURATION
+        ])
     );
 }
