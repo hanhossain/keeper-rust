@@ -1,7 +1,7 @@
 use crate::{PKG_NAME, SpanExt};
 use axum::http::Extensions;
 use opentelemetry::context::FutureExt;
-use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_http::HeaderInjector;
 use opentelemetry_semantic_conventions::trace::{
@@ -14,17 +14,30 @@ use reqwest_tracing::default_span_name;
 use std::error::Error;
 
 // TODO: add tests
-pub struct ReqwestTracingMiddleware;
+pub struct ReqwestTracingMiddleware<P> {
+    tracer_provider: P,
+}
+
+impl<P> ReqwestTracingMiddleware<P> {
+    pub fn new_with_provider(tracer_provider: P) -> ReqwestTracingMiddleware<P> {
+        ReqwestTracingMiddleware { tracer_provider }
+    }
+}
 
 #[async_trait::async_trait]
-impl Middleware for ReqwestTracingMiddleware {
+impl<P> Middleware for ReqwestTracingMiddleware<P>
+where
+    P: TracerProvider + Send + Sync + 'static,
+    <P as TracerProvider>::Tracer: Send,
+    <<P as TracerProvider>::Tracer as Tracer>::Span: Send + Sync,
+{
     async fn handle(
         &self,
         mut req: Request,
         extensions: &mut Extensions,
         next: Next<'_>,
     ) -> reqwest_middleware::Result<Response> {
-        let tracer = global::tracer(PKG_NAME);
+        let tracer = self.tracer_provider.tracer(PKG_NAME);
         // TODO: test with known path
         let span_name = default_span_name(&req, extensions).to_string();
 
@@ -96,14 +109,12 @@ mod tests {
     use reqwest_middleware::ClientBuilder;
     use reqwest_middleware::reqwest::Client;
 
-    #[ignore]
     #[tokio::test]
     async fn request_succeeded_no_known_path() {
         let exporter = InMemorySpanExporter::default();
         let provider = SdkTracerProvider::builder()
             .with_simple_exporter(exporter.clone())
             .build();
-        global::set_tracer_provider(provider.clone());
         global::set_text_map_propagator(TraceContextPropagator::new());
 
         let mut server = mockito::Server::new_async().await;
@@ -115,10 +126,12 @@ mod tests {
             .await;
 
         let client = ClientBuilder::new(Client::new())
-            .with(ReqwestTracingMiddleware)
+            .with(ReqwestTracingMiddleware::new_with_provider(
+                provider.clone(),
+            ))
             .build();
 
-        let root_span = global::tracer("tracer").start("test root");
+        let root_span = provider.tracer("tracer").start("test root");
         let cx = Context::current_with_span(root_span);
 
         let url = format!("{}/hello", server.url());
