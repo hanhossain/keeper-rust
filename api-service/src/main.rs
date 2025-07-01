@@ -87,6 +87,7 @@ fn init_logs() -> anyhow::Result<SdkLoggerProvider> {
 #[derive(Clone)]
 struct AppState {
     backend_client: ClientWithMiddleware,
+    sleeper_client: ClientWithMiddleware,
 }
 
 impl AppState {
@@ -95,7 +96,15 @@ impl AppState {
             .with(ReqwestTracingMiddleware::new())
             .with(ReqwestMetricsMiddleware::new())
             .build();
-        AppState { backend_client }
+
+        let sleeper_client = ClientBuilder::new(reqwest::Client::new())
+            .with(ReqwestTracingMiddleware::new())
+            .with(ReqwestMetricsMiddleware::new())
+            .build();
+        AppState {
+            backend_client,
+            sleeper_client,
+        }
     }
 }
 
@@ -118,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState::new();
     let app = Router::new()
         .route("/ping", get(ping))
+        .route("/state", get(sleeper_state))
         .layer(middleware)
         .with_state(app_state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
@@ -159,6 +169,19 @@ async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>),
             delay_seconds: res.seconds,
         }),
     ))
+}
+
+async fn sleeper_state(State(state): State<AppState>) -> Result<String, AppError> {
+    let response = state
+        .sleeper_client
+        .get("https://api.sleeper.app/v1/state/nfl")
+        .with_extension(OtelPathNames::known_paths(["/v1/state/nfl"])?)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let text = response.text().await?;
+    Ok(text)
 }
 
 #[derive(Serialize)]
