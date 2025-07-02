@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/state", get(sleeper_state))
         .layer(middleware)
         .with_state(app_state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3001").await?;
 
     tracing::debug!("listening on {}", listener.local_addr()?);
 
@@ -148,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
 async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>), AppError> {
     let res = state
         .backend_client
-        .get("http://localhost:3001/random")
+        .get("http://localhost:3002/random")
         .with_extension(OtelPathNames::known_paths(["/random"])?)
         .send()
         .await?
@@ -157,7 +157,7 @@ async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>),
 
     state
         .backend_client
-        .get("http://localhost:3001/randomfail")
+        .get("http://localhost:3002/randomfail")
         .with_extension(OtelPathNames::known_paths(["/randomfail"])?)
         .send()
         .await?

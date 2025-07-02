@@ -96,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/random", get(random_handler))
         .route("/randomfail", get(randomfail_handler))
         .layer(middleware);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3001").await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3002").await?;
 
     tracing::debug!("listening on {}", listener.local_addr()?);
 
