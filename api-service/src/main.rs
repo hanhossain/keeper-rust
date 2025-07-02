@@ -7,7 +7,7 @@ use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
@@ -45,10 +45,12 @@ fn init_tracer() -> anyhow::Result<SdkTracerProvider> {
 
 fn init_metrics() -> anyhow::Result<SdkMeterProvider> {
     let exporter = MetricExporter::builder().with_tonic().build()?;
-
+    let reader = PeriodicReader::builder(exporter)
+        .with_interval(Duration::from_secs(1))
+        .build();
     let provider = SdkMeterProvider::builder()
         .with_resource(RESOURCE.clone())
-        .with_periodic_exporter(exporter)
+        .with_reader(reader)
         .build();
 
     global::set_meter_provider(provider.clone());
