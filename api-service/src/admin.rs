@@ -1,13 +1,14 @@
+use axum::extract::Query;
 use axum::routing::put;
-use axum::{Extension, Router};
+use axum::{Extension, Json, Router};
 use reqwest_middleware::ClientWithMiddleware;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use service_common::error::AppError;
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn router() -> Router {
-    Router::new().route("/admin/players", put(update_players))
+    Router::new().route("/admin/players", put(update_players).get(get_players))
 }
 
 async fn update_players(
@@ -69,4 +70,35 @@ struct SleeperPlayer {
     team: Option<String>,
     status: Option<String>,
     injury_status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetPlayersQuery {
+    team: String,
+}
+
+#[derive(Debug, sqlx::FromRow, Serialize)]
+struct GetPlayersResult {
+    id: String,
+    first_name: String,
+    last_name: String,
+    position: Option<String>,
+    team: Option<String>,
+}
+
+async fn get_players(
+    Query(query): Query<GetPlayersQuery>,
+    Extension(pg_pool): Extension<PgPool>,
+) -> Result<Json<Vec<GetPlayersResult>>, AppError> {
+    let players = sqlx::query_as::<_, GetPlayersResult>(
+        r#"
+select id, first_name, last_name, position, team
+from players
+where active and team = $1
+"#,
+    )
+    .bind(query.team)
+    .fetch_all(&pg_pool)
+    .await?;
+    Ok(Json(players))
 }

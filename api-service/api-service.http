@@ -1,4 +1,5 @@
 ### Update players
 PUT http://localhost:3000/admin/players
 
-###
+### Get players
+GET http://localhost:3000/admin/players?team=KC
