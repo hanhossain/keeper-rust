@@ -1,7 +1,9 @@
+mod admin;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use opentelemetry::global;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter};
@@ -18,6 +20,7 @@ use service_common::middleware::client_metrics::ReqwestMetricsMiddleware;
 use service_common::middleware::client_trace::ReqwestTracingMiddleware;
 use service_common::middleware::metrics::RequestMetricsLayer;
 use service_common::middleware::trace::RequestTraceLayer;
+use sqlx::postgres::PgPoolOptions;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tower::ServiceBuilder;
@@ -67,6 +70,7 @@ fn init_logs() -> anyhow::Result<SdkLoggerProvider> {
         EnvFilter::new("info")
             .add_directive("api_service=trace".parse()?)
             .add_directive("service_common=trace".parse()?)
+            .add_directive("sqlx=debug".parse()?)
             .add_directive("hyper=off".parse()?)
             .add_directive("tonic=off".parse()?)
             .add_directive("h2=off".parse()?)
@@ -121,11 +125,17 @@ async fn main() -> anyhow::Result<()> {
         .layer(RequestMetricsLayer::new())
         .layer(TimeoutLayer::new(Duration::from_secs(10)));
 
+    let pg_pool = PgPoolOptions::new()
+        .connect("postgresql://postgres@localhost:5432/postgres")
+        .await?;
+
     let app_state = AppState::new();
     let app = Router::new()
         .route("/ping", get(ping))
         .route("/state", get(sleeper_state))
+        .merge(admin::router())
         .layer(middleware)
+        .layer(Extension(pg_pool))
         .with_state(app_state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
 

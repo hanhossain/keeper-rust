@@ -1,0 +1,4 @@
+### Update players
+PUT http://localhost:3000/admin/players
+
+###

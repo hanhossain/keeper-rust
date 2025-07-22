@@ -7,3 +7,9 @@ services:
       - "4317:18889"
     environment:
       ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: true
+  postgres:
+    image: postgres:17.5
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
