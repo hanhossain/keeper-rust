@@ -55,7 +55,6 @@ dependencies = [
  "reqwest-middleware",
  "reqwest-tracing",
  "serde",
- "serde_json",
  "service-common",
  "sqlx",
  "tokio",

@@ -15,18 +15,14 @@ async fn update_players(
     State(state): State<AppState>,
     Extension(pg_pool): Extension<PgPool>,
 ) -> Result<(), AppError> {
-    // let response = state
-    //     .sleeper_client
-    //     .get("https://api.sleeper.app/v1/players/nfl")
-    //     .send()
-    //     .await?
-    //     .error_for_status()?
-    //     .json::<HashMap<String, SleeperPlayer>>()
-    //     .await?;
-    let s = tokio::fs::read_to_string("/Users/hanhossain/Downloads/Get_Players-1753161920797.json")
+    let players = state
+        .sleeper_client
+        .get("https://api.sleeper.app/v1/players/nfl")
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<HashMap<String, SleeperPlayer>>()
         .await?;
-    let players: HashMap<String, SleeperPlayer> = serde_json::from_str(&s)?;
-
     let positions = HashSet::from(["QB", "RB", "WR", "TE", "K", "DEF"]);
 
     for player in players.into_values().filter(|s| {
