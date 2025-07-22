@@ -5,7 +5,7 @@ use axum::{Extension, Router};
 use serde::Deserialize;
 use service_common::error::AppError;
 use sqlx::PgPool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new().route("/admin/players", put(update_players))
@@ -27,12 +27,28 @@ async fn update_players(
         .await?;
     let players: HashMap<String, SleeperPlayer> = serde_json::from_str(&s)?;
 
-    for (player_id, player) in players {
+    let positions = HashSet::from(["QB", "RB", "WR", "TE", "K", "DEF"]);
+
+    for player in players.into_values().filter(|s| {
+        s.position
+            .as_ref()
+            .map_or(false, |p| positions.contains(p.as_str()))
+    }) {
         sqlx::query(
             r#"
 insert into
-players(id, first_name, last_name, active, position, team, status, injury_status)
-values ($1, $2, $3, $4, $5, $6, $7, $8)
+    players(id, first_name, last_name, active, position, team, status, injury_status)
+values
+    ($1, $2, $3, $4, $5, $6, $7, $8)
+on conflict (id)
+do update set
+    first_name = excluded.first_name,
+    last_name = excluded.last_name,
+    active = excluded.active,
+    position = excluded.position,
+    team = excluded.team,
+    status = excluded.status,
+    injury_status = excluded.injury_status
 "#,
         )
         .bind(player.player_id)
