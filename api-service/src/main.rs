@@ -1,6 +1,5 @@
 mod admin;
 
-use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Extension, Json, Router};
@@ -88,30 +87,6 @@ fn init_logs() -> anyhow::Result<SdkLoggerProvider> {
     Ok(provider)
 }
 
-#[derive(Clone)]
-struct AppState {
-    backend_client: ClientWithMiddleware,
-    sleeper_client: ClientWithMiddleware,
-}
-
-impl AppState {
-    fn new() -> AppState {
-        let backend_client = ClientBuilder::new(reqwest::Client::new())
-            .with(ReqwestTracingMiddleware::new())
-            .with(ReqwestMetricsMiddleware::new())
-            .build();
-
-        let sleeper_client = ClientBuilder::new(reqwest::Client::new())
-            .with(ReqwestTracingMiddleware::new())
-            .with(ReqwestMetricsMiddleware::new())
-            .build();
-        AppState {
-            backend_client,
-            sleeper_client,
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     global::set_text_map_propagator(TraceContextPropagator::new());
@@ -129,14 +104,18 @@ async fn main() -> anyhow::Result<()> {
         .connect("postgresql://postgres@localhost:5432/postgres")
         .await?;
 
-    let app_state = AppState::new();
+    let client = ClientBuilder::new(reqwest::Client::new())
+        .with(ReqwestTracingMiddleware::new())
+        .with(ReqwestMetricsMiddleware::new())
+        .build();
+
     let app = Router::new()
         .route("/ping", get(ping))
         .route("/state", get(sleeper_state))
         .merge(admin::router())
         .layer(middleware)
-        .layer(Extension(pg_pool))
-        .with_state(app_state);
+        .layer(Extension(client))
+        .layer(Extension(pg_pool));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
 
     tracing::debug!("listening on {}", listener.local_addr()?);
@@ -152,9 +131,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>), AppError> {
-    let res = state
-        .backend_client
+async fn ping(
+    Extension(client): Extension<ClientWithMiddleware>,
+) -> Result<(StatusCode, Json<Ping>), AppError> {
+    let res = client
         .get("http://localhost:3001/random")
         .with_extension(OtelPathNames::known_paths(["/random"])?)
         .send()
@@ -162,8 +142,7 @@ async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>),
         .json::<BackendResponse>()
         .await?;
 
-    state
-        .backend_client
+    client
         .get("http://localhost:3001/randomfail")
         .with_extension(OtelPathNames::known_paths(["/randomfail"])?)
         .send()
@@ -178,9 +157,10 @@ async fn ping(State(state): State<AppState>) -> Result<(StatusCode, Json<Ping>),
     ))
 }
 
-async fn sleeper_state(State(state): State<AppState>) -> Result<String, AppError> {
-    let response = state
-        .sleeper_client
+async fn sleeper_state(
+    Extension(client): Extension<ClientWithMiddleware>,
+) -> Result<String, AppError> {
+    let response = client
         .get("https://api.sleeper.app/v1/state/nfl")
         .with_extension(OtelPathNames::known_paths(["/v1/state/nfl"])?)
         .send()

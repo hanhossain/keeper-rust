@@ -1,22 +1,20 @@
-use crate::AppState;
-use axum::extract::State;
 use axum::routing::put;
 use axum::{Extension, Router};
+use reqwest_middleware::ClientWithMiddleware;
 use serde::Deserialize;
 use service_common::error::AppError;
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 
-pub(crate) fn router() -> Router<AppState> {
+pub(crate) fn router() -> Router {
     Router::new().route("/admin/players", put(update_players))
 }
 
 async fn update_players(
-    State(state): State<AppState>,
+    Extension(client): Extension<ClientWithMiddleware>,
     Extension(pg_pool): Extension<PgPool>,
 ) -> Result<(), AppError> {
-    let players = state
-        .sleeper_client
+    let players = client
         .get("https://api.sleeper.app/v1/players/nfl")
         .send()
         .await?
