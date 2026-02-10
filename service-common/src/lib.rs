@@ -1,6 +1,7 @@
 pub mod error;
 pub mod middleware;
 
+use axum::http::Version;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::SpanRef;
 use opentelemetry_semantic_conventions::trace::{EXCEPTION_MESSAGE, EXCEPTION_STACKTRACE};
@@ -21,6 +22,17 @@ pub async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {}
+    }
+}
+
+fn http_version(version: Version) -> &'static str {
+    match version {
+        Version::HTTP_09 => "0.9",
+        Version::HTTP_10 => "1.0",
+        Version::HTTP_11 => "1.1",
+        Version::HTTP_2 => "2.0",
+        Version::HTTP_3 => "3.0",
+        _ => unreachable!(),
     }
 }
 

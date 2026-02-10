@@ -1,4 +1,4 @@
-use crate::{PKG_NAME, SpanExt};
+use crate::{PKG_NAME, SpanExt, http_version};
 use axum::extract::{MatchedPath, Request};
 use axum::response::Response;
 use futures_util::future::BoxFuture;
@@ -84,7 +84,10 @@ where
             KeyValue::new(HTTP_REQUEST_METHOD, method.to_string()),
             KeyValue::new(URL_SCHEME, scheme.to_string()),
             // TODO: consider trimming HTTP/ from the version
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, format!("{:?}", request.version())),
+            KeyValue::new(
+                NETWORK_PROTOCOL_VERSION,
+                http_version(request.version()).to_string(),
+            ),
         ];
 
         if let Some(route) = route {
@@ -198,7 +201,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
@@ -238,7 +241,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
@@ -321,7 +324,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/foo/{id}"),
             KeyValue::new(URL_PATH, "/foo/1"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
@@ -364,7 +367,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/foo"),
             KeyValue::new(URL_PATH, "/foo"),
             KeyValue::new(URL_QUERY, "query=value"),
@@ -404,7 +407,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
@@ -451,7 +454,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(ERROR_TYPE, "TestError"),
         ];
@@ -538,7 +541,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
@@ -614,7 +617,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
@@ -666,7 +669,7 @@ mod tests {
         let attributes = vec![
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(URL_SCHEME, "http"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(HTTP_ROUTE, "/"),
             KeyValue::new(URL_PATH, "/"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),

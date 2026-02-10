@@ -1,4 +1,4 @@
-use crate::PKG_NAME;
+use crate::{PKG_NAME, http_version};
 use axum::extract::{MatchedPath, Request};
 use axum::http::{Method, StatusCode, Version};
 use axum::response::Response;
@@ -175,7 +175,7 @@ impl AttributeBuilder {
         // TODO: consider trimming HTTP/ from the version
         self.version = Some(KeyValue::new(
             NETWORK_PROTOCOL_VERSION,
-            format!("{:?}", version),
+            http_version(version),
         ));
         self
     }
@@ -268,7 +268,7 @@ mod tests {
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 200),
             KeyValue::new(HTTP_ROUTE, "/"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(URL_SCHEME, "http"),
         ]);
         assert_eq!(attributes, expected_attributes);
@@ -311,7 +311,7 @@ mod tests {
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE, 500),
             KeyValue::new(HTTP_ROUTE, "/"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(URL_SCHEME, "http"),
             KeyValue::new(ERROR_TYPE, "500"),
         ]);
@@ -358,7 +358,7 @@ mod tests {
         let attributes: HashSet<_> = data_point.attributes().cloned().collect();
         let expected_attributes = HashSet::from([
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
-            KeyValue::new(NETWORK_PROTOCOL_VERSION, "HTTP/1.1"),
+            KeyValue::new(NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(URL_SCHEME, "http"),
             KeyValue::new(ERROR_TYPE, "TestError"),
         ]);
