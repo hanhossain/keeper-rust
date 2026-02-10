@@ -190,7 +190,7 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
         assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
         assert_eq!(span.status, Status::Unset);
@@ -230,7 +230,7 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
         assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
         assert_eq!(span.status, Status::Unset);
@@ -279,11 +279,11 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /foo");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
 
         let span = &spans[1];
         assert_eq!(span.name, "GET /bar");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
     }
 
     #[tokio::test]
@@ -314,7 +314,7 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /foo/{id}");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
         assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
 
@@ -357,7 +357,7 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /foo");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
         assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
 
@@ -396,7 +396,7 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
         assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
         assert_eq!(span.status, Status::error(""));
@@ -488,7 +488,7 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /");
-        assert_eq!(span.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(span.parent_span_id, SpanId::from(0));
         assert_eq!(span.events.events[0].name, "hello");
     }
 
@@ -532,7 +532,7 @@ mod tests {
 
         // verify parent span
         assert_eq!(parent.name, "GET /");
-        assert_eq!(parent.parent_span_id, SpanId::from_u64(0));
+        assert_eq!(parent.parent_span_id, SpanId::from(0));
         assert_eq!(parent.instrumentation_scope.name(), PKG_NAME);
 
         let attributes = vec![
@@ -657,8 +657,8 @@ mod tests {
 
         let span = &spans[0];
         assert_eq!(span.name, "GET /");
-        assert_eq!(span.span_context.trace_id(), TraceId::from_u128(1));
-        assert_eq!(span.parent_span_id, SpanId::from_u64(2));
+        assert_eq!(span.span_context.trace_id(), TraceId::from(1));
+        assert_eq!(span.parent_span_id, SpanId::from(2));
         assert_eq!(span.span_kind, SpanKind::Server);
         assert_eq!(span.instrumentation_scope.name(), PKG_NAME);
         assert_eq!(span.status, Status::Unset);

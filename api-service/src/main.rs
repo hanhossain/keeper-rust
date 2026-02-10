@@ -110,7 +110,10 @@ async fn main() -> anyhow::Result<()> {
     let middleware = ServiceBuilder::new()
         .layer(RequestTraceLayer::new())
         .layer(RequestMetricsLayer::new())
-        .layer(TimeoutLayer::new(Duration::from_secs(10)));
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(10),
+        ));
 
     let app_state = AppState::new();
     let app = Router::new()
