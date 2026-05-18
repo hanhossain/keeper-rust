@@ -4,21 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = { version = "1.0.101", features = ["backtrace"] }
+anyhow = { version = "1.0.102", features = ["backtrace"] }
 async-trait = "0.1.89"
-axum = "0.8.8"
-futures-util = "0.3.31"
-opentelemetry = "0.31.0"
-opentelemetry-http = "0.31.0"
-opentelemetry-semantic-conventions = { version = "0.31.0", features = ["semconv_experimental"] }
+axum = "0.8.9"
+futures-util = "0.3.32"
+opentelemetry = "0.32.0"
+opentelemetry-http = "0.32.0"
+opentelemetry-semantic-conventions = { version = "0.32.0", features = ["semconv_experimental"] }
 reqwest-middleware = "0.5.1"
 reqwest-tracing = "0.7.0"
-tokio = "1.49.0"
+tokio = "1.52.3"
 tower = "0.5.3"
 tracing = "0.1.44"
 
 [dev-dependencies]
 mockito = "1.7.2"
-opentelemetry_sdk = { version = "0.31.0", features = ["testing"] }
+opentelemetry_sdk = { version = "0.32.0", features = ["testing"] }
 pretty_assertions = "1.4.1"
-tokio = { version = "1.49.0", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
